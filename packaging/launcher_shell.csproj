@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>热点图文工作台</AssemblyName>
+    <RootNamespace>HotspotArticleAgent</RootNamespace>
+    <ApplicationIcon>..\ui\assets\brand.ico</ApplicationIcon>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\scripts\launcher_shell.cs" Link="launcher_shell.cs" />
+  </ItemGroup>
+</Project>

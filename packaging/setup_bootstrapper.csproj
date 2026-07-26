@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>热点图文批量生产工作台_Setup</AssemblyName>
+    <RootNamespace>HotspotArticleAgentSetup</RootNamespace>
+    <ApplicationIcon>..\ui\assets\brand.ico</ApplicationIcon>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="setup_bootstrapper.cs" />
+  </ItemGroup>
+</Project>

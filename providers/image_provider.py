@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import time
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+from PIL import Image
+
+from modules.network import create_http_client, resolve_network_settings
+from modules.security import redact_sensitive_text
+from providers.contracts import ImageGenerationRequest, ModelTestResult
+from providers.errors import is_retryable_error, map_provider_exception, user_facing_error_message
+from providers.text_provider import ProviderError, _headers
+
+
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+
+def normalize_image_size(size: Any, api_format: str | None = None) -> str:
+    value = str(size or "").strip()
+    if not value:
+        value = "1024*1024" if str(api_format or "").lower() == "dashscope_native" else "1536x1024"
+    if str(api_format or "").lower() == "dashscope_native":
+        return value.replace("x", "*")
+    return value.replace("*", "x")
+
+
+def inspect_image(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise ProviderError("INVALID_RESPONSE", "image file was not created")
+    size = path.stat().st_size
+    if size <= 0 or size > MAX_IMAGE_BYTES:
+        raise ProviderError("INVALID_RESPONSE", "image file size is invalid")
+    try:
+        with Image.open(path) as image:
+            image.verify()
+        with Image.open(path) as image:
+            width, height = image.size
+            image_format = str(image.format or "").lower()
+    except Exception as exc:
+        raise ProviderError("INVALID_RESPONSE", "image file is not a valid raster image") from exc
+    if width < 64 or height < 64 or image_format not in {"png", "jpeg", "webp"}:
+        raise ProviderError("INVALID_RESPONSE", "image dimensions or format are unsupported")
+    return {"mime_type": f"image/{'jpeg' if image_format == 'jpeg' else image_format}", "format": image_format, "width": width, "height": height, "bytes": size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+class OpenAIImageProvider:
+    def __init__(self, profile: dict[str, Any], network_settings: dict[str, Any] | None = None) -> None:
+        self.profile = profile
+        self.network_settings = resolve_network_settings(network_settings, profile)
+        self.last_http_status: int | None = None
+        self.last_response_type = ""
+        self.generation_calls = 0
+
+    def check_configuration(self) -> ModelTestResult:
+        """Validate image settings only; this method never calls the image endpoint."""
+        started = time.perf_counter()
+        base_url = str(self.profile.get("base_url") or "").strip()
+        endpoint = str(self.profile.get("endpoint") or "").strip()
+        model = str(self.profile.get("model") or "").strip()
+        code = ""
+        if not base_url or urlparse(base_url).scheme not in {"http", "https"} or not urlparse(base_url).netloc:
+            code = "INVALID_REQUEST"
+        elif not endpoint.startswith("/") or endpoint.rstrip("/") in {"", "/chat/completions"}:
+            code = "INVALID_REQUEST"
+        details = {"generation_calls": 0, "paid_test": False, "charged": False, "configuration_only": True, "key_present": bool(str(self.profile.get("api_key") or ""))}
+        elapsed = int((time.perf_counter() - started) * 1000)
+        if code:
+            return ModelTestResult(False, "openai-compatible-image", model, elapsed_ms=elapsed, error_code=code, error_message=user_facing_error_message(code, "图片配置不完整"), details=details)
+        return ModelTestResult(True, "openai-compatible-image", model, elapsed_ms=elapsed, details=details)
+
+    def test_connection(self, output_path: Path) -> ModelTestResult:
+        started = time.perf_counter()
+        try:
+            path = self.generate_image(ImageGenerationRequest("一只白色咖啡杯放在木桌上，纯净背景，不含文字。", output_path))
+            metadata = inspect_image(path)
+            return ModelTestResult(True, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, details={**metadata, "generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
+        except Exception as exc:
+            mapped = map_provider_exception(exc)
+            code = str(getattr(mapped, "code", "PROVIDER_INTERNAL_ERROR"))
+            detail = str(getattr(mapped, "detail", mapped))
+            return ModelTestResult(False, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, error_code=code, error_message=user_facing_error_message(code, redact_sensitive_text(detail)), retryable=is_retryable_error(code), details={"generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
+
+    def generate(self, prompt: str, output_path: Path) -> Path:
+        return self.generate_image(ImageGenerationRequest(prompt, output_path))
+
+    def generate_image(self, request: ImageGenerationRequest) -> Path:
+        api_key = str(self.profile.get("api_key") or "")
+        if not api_key and str(self.profile.get("auth_type") or "bearer").lower() != "none":
+            raise ProviderError("MODEL_NOT_CONFIGURED", "image model API key is missing")
+        base_url = str(self.profile.get("base_url") or "").rstrip("/")
+        endpoint = str(self.profile.get("endpoint") or "/images/generations")
+        if not base_url:
+            raise ProviderError("MODEL_NOT_CONFIGURED", "image model base URL is missing")
+        url = f"{base_url}/{endpoint.lstrip('/')}"
+        native_dashscope = str(self.profile.get("api_format") or "").lower() == "dashscope_native"
+        if native_dashscope:
+            payload = {
+                "model": self.profile.get("model"),
+                "input": {
+                    "messages": [{
+                        "role": "user",
+                        "content": [{"text": request.prompt}],
+                    }]
+                },
+                "parameters": {
+                    "watermark": False,
+                    "size": normalize_image_size(self.profile.get("size"), "dashscope_native"),
+                },
+            }
+        else:
+            payload = {"model": self.profile.get("model"), "prompt": request.prompt, "size": normalize_image_size(self.profile.get("size"), "openai_compatible"), "n": 1}
+        response: httpx.Response | None = None
+        try:
+            self.generation_calls += 1
+            timeout = float(self.profile.get("timeout_seconds") or self.network_settings.get("timeout_seconds") or 180)
+            with create_http_client({**self.network_settings, "timeout_seconds": timeout}) as client:
+                response = client.post(url, headers=_headers(self.profile), json=payload)
+            self.last_http_status = response.status_code
+            if response.status_code == 401:
+                raise ProviderError("AUTHENTICATION_FAILED", "image model authentication failed")
+            if response.status_code == 404:
+                content_type = str(response.headers.get("content-type") or "").lower()
+                if "text/html" in content_type or "text/plain" in content_type:
+                    raise ProviderError("IMAGE_GENERATION_NOT_SUPPORTED", "image generation endpoint is unavailable")
+                raise ProviderError("MODEL_NOT_FOUND", "image model endpoint or model was not found")
+            if response.status_code == 429:
+                from providers.errors import parse_retry_after
+                raise ProviderError("RATE_LIMITED", "image model rate limited", parse_retry_after(response.headers.get("Retry-After")))
+            response.raise_for_status()
+            data = response.json()
+            item: dict[str, Any] = data.get("data", [{}])[0]
+            if native_dashscope:
+                choices = data.get("output", {}).get("choices", []) if isinstance(data.get("output"), dict) else []
+                content = choices[0].get("message", {}).get("content", []) if choices and isinstance(choices[0], dict) else []
+                native_image = next((part.get("image") for part in content if isinstance(part, dict) and part.get("image")), None) if isinstance(content, list) else None
+                item = {"url": native_image} if native_image else {}
+            request.output_path.parent.mkdir(parents=True, exist_ok=True)
+            if item.get("b64_json"):
+                self.last_response_type = "base64"
+                request.output_path.write_bytes(base64.b64decode(item["b64_json"], validate=True))
+            elif item.get("url"):
+                self.last_response_type = "url"
+                with create_http_client({**self.network_settings, "timeout_seconds": 60}) as client:
+                    image = client.get(str(item["url"]))
+                    image.raise_for_status()
+                    request.output_path.write_bytes(image.content)
+            else:
+                raise ProviderError("UNSUPPORTED_RESPONSE_FORMAT", "image response has no URL or base64 payload")
+            inspect_image(request.output_path)
+            return request.output_path
+        except httpx.TimeoutException as exc:
+            raise ProviderError("TIMEOUT", "image model response timed out") from exc
+        except httpx.HTTPError as exc:
+            raise map_provider_exception(exc, response) from exc
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise map_provider_exception(exc, response) from exc

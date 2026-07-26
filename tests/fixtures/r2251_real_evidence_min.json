@@ -1,0 +1,100 @@
+{
+  "research_status": "sufficient",
+  "accepted_source_count": 1,
+  "usable_fact_count": 3,
+  "official_or_reliable_source_count": 1,
+  "official_source_count": 1,
+  "key_organizations": [
+    "外交部",
+    "中国海警"
+  ],
+  "sources": [
+    {
+      "source_id": "s1",
+      "source_name": "外交部",
+      "publisher_id": "mfa.gov.cn",
+      "domain": "mfa.gov.cn",
+      "source_level": "official",
+      "fetch_success": true,
+      "accepted_for_research": true,
+      "content": "2026年7月21日，外交部边海司负责人就菲律宾在仁爱礁蓄意挑衅提出严正交涉。仁爱礁是中国南沙群岛的一部分。中国海警在仁爱礁附近海域开展执法活动。",
+      "summary": "2026年7月21日，外交部边海司负责人就菲律宾在仁爱礁蓄意挑衅提出严正交涉。仁爱礁是中国南沙群岛的一部分。中国海警在仁爱礁附近海域开展执法活动。"
+    }
+  ],
+  "verified_facts": [
+    {
+      "fact_id": "f1",
+      "canonical_fact": "2026年7月21日，外交部边海司负责人就菲律宾在仁爱礁蓄意挑衅提出严正交涉。",
+      "supporting_source_ids": [
+        "s1"
+      ],
+      "supporting_publisher_ids": [
+        "mfa.gov.cn"
+      ],
+      "confidence": "high",
+      "verification_type": "official_single_source"
+    },
+    {
+      "fact_id": "f2",
+      "canonical_fact": "仁爱礁是中国南沙群岛的一部分。",
+      "supporting_source_ids": [
+        "s1"
+      ],
+      "supporting_publisher_ids": [
+        "mfa.gov.cn"
+      ],
+      "confidence": "high",
+      "verification_type": "official_single_source"
+    },
+    {
+      "fact_id": "f3",
+      "canonical_fact": "中国海警在仁爱礁附近海域开展执法活动。",
+      "supporting_source_ids": [
+        "s1"
+      ],
+      "supporting_publisher_ids": [
+        "mfa.gov.cn"
+      ],
+      "confidence": "high",
+      "verification_type": "official_single_source"
+    }
+  ],
+  "usable_facts": [
+    {
+      "fact_id": "f1",
+      "canonical_fact": "2026年7月21日，外交部边海司负责人就菲律宾在仁爱礁蓄意挑衅提出严正交涉。",
+      "supporting_source_ids": [
+        "s1"
+      ],
+      "supporting_publisher_ids": [
+        "mfa.gov.cn"
+      ],
+      "confidence": "high",
+      "verification_type": "official_single_source"
+    },
+    {
+      "fact_id": "f2",
+      "canonical_fact": "仁爱礁是中国南沙群岛的一部分。",
+      "supporting_source_ids": [
+        "s1"
+      ],
+      "supporting_publisher_ids": [
+        "mfa.gov.cn"
+      ],
+      "confidence": "high",
+      "verification_type": "official_single_source"
+    },
+    {
+      "fact_id": "f3",
+      "canonical_fact": "中国海警在仁爱礁附近海域开展执法活动。",
+      "supporting_source_ids": [
+        "s1"
+      ],
+      "supporting_publisher_ids": [
+        "mfa.gov.cn"
+      ],
+      "confidence": "high",
+      "verification_type": "official_single_source"
+    }
+  ]
+}

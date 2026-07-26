@@ -1,0 +1,13 @@
+config/settings.json
+data/cache/*
+data/tasks/*
+outputs/*
+export/user/*
+export/batches/*
+.attempts/
+.versions/
+*.draft.json
+data/model-test.png
+__pycache__/
+*.pyc
+.venv/
