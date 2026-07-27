@@ -52,6 +52,8 @@ service = HotTrendService(load_settings(), store=store)
 executor = get_executor()
 batch_executor = get_batch_executor()
 
+EXPORTABLE_ARTICLE_STATUSES = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
+
 
 @asynccontextmanager
 async def app_lifespan(application: FastAPI):
@@ -1009,10 +1011,13 @@ def _article_export(task_id: str, kind: str) -> FileResponse:
     state = load_generation_task(task_id)
     if not state or not isinstance(state.get("article"), dict):
         raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
-    exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
-    if state.get("status") not in exportable_statuses or state.get("rewrite_requested"):
+    if state.get("status") not in EXPORTABLE_ARTICLE_STATUSES or state.get("rewrite_requested"):
         raise ProviderError("ARTICLE_NOT_FINAL", "article is not final")
     article = prepare_article_layout(state["article"])
+    if not str(article.get("content_markdown") or "").strip():
+        raise ProviderError("ARTICLE_NOT_AVAILABLE", "article content is missing")
+    if str((state.get("quality_gate") or {}).get("status") or "") == "failed":
+        raise ProviderError("ARTICLE_NOT_FINAL", "article quality gate failed")
     if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
         raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
         raise ProviderError("ARTICLE_NOT_FINAL", "内容仍在进行差异检查或自动优化，完成后即可导出。")
@@ -1027,6 +1032,25 @@ def _article_export(task_id: str, kind: str) -> FileResponse:
     path = export_root / f"{task_id}_{title}.zip"
     export_article_bundle(article, root, path)
     return FileResponse(path, media_type="application/zip", filename=f"{title}.zip")
+
+
+def _exportable_state_article(task_id: str, *, absolute_image_paths: bool = False) -> tuple[dict[str, Any], Path]:
+    state = load_generation_task(task_id) if task_id else None
+    if not state or state.get("status") not in EXPORTABLE_ARTICLE_STATUSES:
+        raise ProviderError("ARTICLE_NOT_FINAL", "article is not final")
+    if str((state.get("quality_gate") or {}).get("status") or "") == "failed":
+        raise ProviderError("ARTICLE_NOT_FINAL", "article quality gate failed")
+    article = state.get("article")
+    if not isinstance(article, dict) or not str(article.get("content_markdown") or "").strip():
+        raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
+    article = prepare_article_layout(article)
+    if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
+        raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
+    root = generation_task_dir(task_id)
+    if absolute_image_paths:
+        article = sanitize_sensitive_data(article)
+        article["images"] = [{**image, "path": str(root / str(image.get("path") or ""))} for image in article.get("images") or []]
+    return article, root
 
 
 @app.get("/api/tasks/{task_id}/export/word")
@@ -1061,11 +1085,10 @@ def export_batch_zip(batch_id: str):
         articles: list[tuple[dict[str, Any], Path]] = []
         for item in batch.get("items") or []:
             task_id = str((item.get("task") or {}).get("task_id") or "")
-            state = load_generation_task(task_id) if task_id else None
-            if state and isinstance(state.get("article"), dict) and state.get("status") in {"completed", "partial_success"}:
-                if state["article"].get("layout_status") != "passed" or not (state["article"].get("layout_check") or {}).get("passed"):
-                    raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
-                articles.append((state["article"], generation_task_dir(task_id)))
+            task_status = str((item.get("task") or {}).get("status") or "")
+            if task_status == "cancelled":
+                continue
+            articles.append(_exportable_state_article(task_id))
         if not articles:
             raise ProviderError("ARTICLE_NOT_AVAILABLE", "没有可导出的文章")
         export_root = exports_root()
@@ -1091,13 +1114,11 @@ def export_batch_word(batch_id: str):
         articles: list[dict[str, Any]] = []
         for item in batch.get("items") or []:
             task_id = str((item.get("task") or {}).get("task_id") or "")
-            state = load_generation_task(task_id) if task_id else None
-            if state and isinstance(state.get("article"), dict) and state.get("status") in {"completed", "partial_success"}:
-                if state["article"].get("layout_status") != "passed" or not (state["article"].get("layout_check") or {}).get("passed"):
-                    raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
-                article = sanitize_sensitive_data(state["article"])
-                article["images"] = [{**image, "path": str(generation_task_dir(task_id) / str(image.get("path") or ""))} for image in article.get("images") or []]
-                articles.append(article)
+            task_status = str((item.get("task") or {}).get("status") or "")
+            if task_status == "cancelled":
+                continue
+            article, _ = _exportable_state_article(task_id, absolute_image_paths=True)
+            articles.append(article)
         if not articles:
             raise ProviderError("ARTICLE_NOT_AVAILABLE", "没有可导出的文章")
         export_root = exports_root()

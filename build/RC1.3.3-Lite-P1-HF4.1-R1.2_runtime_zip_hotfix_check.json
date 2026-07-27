@@ -1,0 +1,14 @@
+{
+  "release": "RC1.3.3-Lite-P1-HF4.1-R1.2",
+  "runtime_zip": "热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Windows运行包.zip",
+  "checked_at": "2026-07-27T08:15:32.095198+00:00",
+  "manual_topic_detector": true,
+  "custom_topic_fallback": true,
+  "text_key_hard_error": true,
+  "desktop_downloads_enabled": true,
+  "text_model_status_ui": true,
+  "single_export_buttons": true,
+  "exportable_statuses_api": true,
+  "batch_final_ready_relaxed": true,
+  "status": "PASS"
+}

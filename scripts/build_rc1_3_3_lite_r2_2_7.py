@@ -16,8 +16,8 @@ sys.path.insert(0, str(ROOT))
 
 from scripts import build_rc1_3_1 as base
 import package_phase1
-RELEASE = "RC1.3.3-Lite-P1-HF4.1-R1.1"
-STATUS = "RC1.3.3-Lite-P1-HF4.1-R1.1 零来源正式运行主链热修完成，Setup已构建并安装烟测，等待用户最终文章复测。"
+RELEASE = "RC1.3.3-Lite-P1-HF4.1-R1.2"
+STATUS = "RC1.3.3-Lite-P1-HF4.1-R1.2 手动话题、真实文本生成与桌面导出热修完成，等待用户最后一次文章和图片复测。"
 PRODUCT = f"\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0_{RELEASE}"
 APP_NAME = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0"
 APP_EXE = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0.exe"
@@ -515,7 +515,7 @@ def main() -> int:
     launcher, _setup_stub = base.build_native(native_dir)
 
     source_zip = ROOT / f"{PRODUCT}_Source.zip"
-    source_manifest = ROOT / "HF4.1-R1.1_source_manifest.json"
+    source_manifest = ROOT / "HF4.1-R1.2_source_manifest.json"
     package_phase1.OUTPUT = source_zip
     package_phase1.MANIFEST = source_manifest
     package_phase1.main()
@@ -561,7 +561,7 @@ def main() -> int:
     license_admin_exe = build_license_admin_exe(ROOT / "热点图文工作台_本地许可证签发工具.exe")
     license_admin_zip = build_license_admin_package(ROOT / "热点图文工作台_本地许可证签发工具.zip")
 
-    report = ROOT / "HF4.1-R1.1_最终构建报告.md"
+    report = ROOT / "HF4.1-R1.2_最终构建报告.md"
     report.write_text(
         f"# {RELEASE} \u6700\u7ec8\u6784\u5efa\u62a5\u544a\n\n"
         f"\u6784\u5efa\u65f6\u95f4\uff1a{now}\n\n"
@@ -579,7 +579,7 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    self_review = ROOT / "HF4.1-R1.1_最终自检报告.md"
+    self_review = ROOT / "HF4.1-R1.2_最终自检报告.md"
     self_review.write_text(
         f"# {RELEASE} \u6700\u7ec8\u81ea\u68c0\u62a5\u544a\n\n"
         f"\u5f53\u524d\u72b6\u6001\uff1a`{STATUS}`\n\n"
@@ -602,11 +602,11 @@ def main() -> int:
         "test_record": test_record,
         "status": STATUS,
     }
-    (ROOT / "HF4.1-R1.1_upload_manifest.json").write_text(
+    (ROOT / "HF4.1-R1.2_upload_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    write_sha256s([setup, customer_zip, source_zip, license_admin_exe, license_admin_zip, ROOT / "HF4.1-R1.1_upload_manifest.json"])
+    write_sha256s([setup, customer_zip, source_zip, license_admin_exe, license_admin_zip, ROOT / "HF4.1-R1.2_upload_manifest.json"])
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0
 

@@ -280,6 +280,8 @@ def _quality_block(state: dict[str, Any], store: SQLiteStore, bundle: dict[str, 
 
 
 def _has_hotlist_metadata(topic: HotTopic) -> bool:
+    if _is_manual_topic(topic):
+        return False
     fields = (
         topic.title,
         topic.summary,
@@ -291,8 +293,82 @@ def _has_hotlist_metadata(topic: HotTopic) -> bool:
     return any(str(value or "").strip() for value in fields)
 
 
+def _is_manual_topic(topic: HotTopic) -> bool:
+    return (
+        str(topic.source or "").lower() == "manual"
+        or str(topic.provider_status or "").lower() == "manual"
+        or str(topic.source_name or "") == "手动输入"
+    )
+
+
+def _is_custom_topic_bundle(bundle: dict[str, Any] | None) -> bool:
+    return bool(bundle and str(bundle.get("research_status") or "") == "custom_topic" and bundle.get("custom_topic"))
+
+
 def _is_hotlist_limited_bundle(bundle: dict[str, Any] | None) -> bool:
     return bool(bundle and bundle.get("hotlist_metadata_available") and str(bundle.get("research_status") or "") == "hotlist_limited")
+
+
+def _build_custom_topic_bundle(topic: HotTopic, original_bundle: dict[str, Any] | None = None, error: str = "") -> dict[str, Any]:
+    original_bundle = original_bundle or {}
+    title = str(topic.title or "自定义话题").strip()
+    summary = str(topic.summary or "").strip()
+    source_url = str(topic.source_url or topic.url or "").strip()
+    fact_text = "；".join(item for item in [f"用户输入话题：{title}", f"用户补充说明：{summary}" if summary else "", f"用户参考链接：{source_url}" if source_url else ""] if item)
+    source = {
+        "source_id": "custom-topic-input",
+        "source_name": str(topic.source_name or "手动输入"),
+        "publisher": str(topic.source_name or "手动输入"),
+        "title": title,
+        "published_at": str(topic.captured_at or ""),
+        "url": source_url,
+        "summary": summary or title,
+        "content": summary or title,
+        "fetch_success": True,
+        "accepted_for_research": False,
+        "custom_topic_input": True,
+        "source_level": "manual",
+    }
+    fact_card = {
+        "fact_id": "custom-topic-input-fact",
+        "subject": title,
+        "action": "用户自定义写作",
+        "object": summary or title,
+        "time": str(topic.captured_at or ""),
+        "location": "",
+        "number": "",
+        "source_name": str(topic.source_name or "手动输入"),
+        "source_url": source_url,
+        "canonical_fact": fact_text,
+        "fact": fact_text,
+        "source_ids": ["custom-topic-input"],
+        "supporting_source_ids": ["custom-topic-input"],
+        "verification_type": "custom_topic",
+        "reliability": "user_input",
+    }
+    bundle = {
+        **original_bundle,
+        "topic_id": topic.id,
+        "topic_title": title,
+        "research_status": "custom_topic",
+        "custom_topic": True,
+        "accepted_source_count": 0,
+        "official_or_reliable_source_count": 0,
+        "usable_fact_count": 1,
+        "candidate_link_count": int(original_bundle.get("candidate_link_count") or 0),
+        "rejected_source_count": int(original_bundle.get("rejected_source_count") or 0),
+        "sources": [source],
+        "usable_facts": [fact_card],
+        "verified_facts": [],
+        "research_fact_cards": [fact_card],
+        "background": [summary] if summary else [],
+        "follow_up": ["围绕用户选择的文章类型、风格和目标读者继续展开。"],
+        "open_questions": [],
+        "custom_topic_notice": "这是用户手动输入的自定义话题，应按方法型、观点型或用户选择的文章类型进行原创写作，不得套用新闻热点基础稿。",
+    }
+    if error:
+        bundle["research_error"] = redact_sensitive_text(error)[:240]
+    return bundle
 
 
 def _build_hotlist_limited_bundle(topic: HotTopic, original_bundle: dict[str, Any] | None = None, error: str = "") -> dict[str, Any]:
@@ -374,7 +450,7 @@ def _bundle_ready(bundle: dict[str, Any] | None) -> bool:
         return False
     accepted = int(bundle.get("accepted_source_count") or 0)
     reliable = int(bundle.get("official_or_reliable_source_count") or bundle.get("official_source_count") or 0)
-    return accepted > 0 or reliable > 0 or str(bundle.get("research_status") or "") in {"sufficient", "verified", "limited"} or _is_hotlist_limited_bundle(bundle)
+    return accepted > 0 or reliable > 0 or str(bundle.get("research_status") or "") in {"sufficient", "verified", "limited"} or _is_hotlist_limited_bundle(bundle) or _is_custom_topic_bundle(bundle)
 
 
 def _auto_collect_research(state: dict[str, Any], store: SQLiteStore, topic: HotTopic) -> dict[str, Any] | None:
@@ -404,7 +480,9 @@ def _auto_collect_research(state: dict[str, Any], store: SQLiteStore, topic: Hot
     _persist(state, store)
     try:
         bundle = ResearchService().collect(topic, references=reference_urls, supplemental_text=supplemental_text)
-        if int((bundle or {}).get("accepted_source_count") or 0) <= 0 and _has_hotlist_metadata(topic):
+        if int((bundle or {}).get("accepted_source_count") or 0) <= 0 and _is_manual_topic(topic):
+            bundle = _build_custom_topic_bundle(topic, bundle)
+        elif int((bundle or {}).get("accepted_source_count") or 0) <= 0 and _has_hotlist_metadata(topic):
             bundle = _build_hotlist_limited_bundle(topic, bundle)
         state["research_attempts"][-1].update({
             "status": str(bundle.get("research_status") or "unknown"),
@@ -418,6 +496,20 @@ def _auto_collect_research(state: dict[str, Any], store: SQLiteStore, topic: Hot
         _persist(state, store)
         return bundle
     except Exception as exc:
+        if _is_manual_topic(topic):
+            bundle = _build_custom_topic_bundle(topic, bundle, str(exc))
+            state["research_attempts"][-1].update({
+                "status": "custom_topic",
+                "error": redact_sensitive_text(str(exc))[:240],
+                "candidate_link_count": int(bundle.get("candidate_link_count") or 0),
+                "accepted_source_count": 0,
+                "rejected_source_count": int(bundle.get("rejected_source_count") or 0),
+            })
+            state["research_bundle"] = sanitize_json(bundle)
+            state["research_status"] = "custom_topic"
+            state.update({"stage": "research_collected", "progress": 12})
+            _persist(state, store)
+            return bundle
         if _has_hotlist_metadata(topic):
             bundle = _build_hotlist_limited_bundle(topic, bundle, str(exc))
             state["research_attempts"][-1].update({
@@ -647,6 +739,82 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
     return article
 
 
+def _build_custom_topic_fallback_article(topic: HotTopic, angle: dict[str, Any], article_type: str, style: str, reason: str) -> dict[str, Any]:
+    title_text = str(topic.title or "自定义话题").strip()
+    summary = str(topic.summary or "").strip()
+    source_url = str(topic.source_url or topic.url or "").strip()
+    title = f"{title_text}：一套可执行的入门方案"
+    intro = "文本模型调用失败，当前展示的是可编辑基础框架。本文先按用户输入的话题搭建方法型结构，便于继续补充案例、数据和个人经验。"
+    sections = [
+        {
+            "heading": "核心概念",
+            "body": f"围绕“{title_text}”，首先要明确它不是单纯追逐技巧，而是把工具能力转化为可交付的服务、内容或流程。{summary or '用户未提供额外说明，后续可补充目标人群、预算和期望成果。'}",
+            "image_brief": "方法型文章的概念梳理场景，无文字",
+        },
+        {
+            "heading": "可执行方法",
+            "body": "可以从低成本、轻交付、可复用三个方向选择路径：用工具提升内容生产效率，用标准化模板承接简单需求，或把重复工作整理成小服务。每一种方法都应对应清晰结果，而不是只展示工具本身。",
+            "image_brief": "工作台、流程卡片、服务交付场景，无文字",
+        },
+        {
+            "heading": "具体步骤",
+            "body": "第一步确定一个具体场景，第二步做出可展示样例，第三步找到愿意付费的目标用户，第四步用固定流程完成交付，第五步记录反馈并优化报价。先跑通一笔小订单，再考虑扩大规模。",
+            "image_brief": "计划清单和执行步骤场景，无文字",
+        },
+        {
+            "heading": "风险提醒",
+            "body": "需要控制学习成本、工具订阅成本和承诺范围。不要承诺无法验证的收益，不要使用未授权素材，也不要把自动生成内容直接交付给客户。涉及合同、版权和平台规则时，应保留人工核对环节。",
+            "image_brief": "风险控制和复核场景，无文字",
+        },
+        {
+            "heading": "总结",
+            "body": "这份框架适合作为继续编辑的底稿。建议检查模型配置后点击“使用文本模型重新生成”，让正式文本模型在该结构基础上补充更完整案例、语气和段落细节。",
+            "image_brief": "总结和下一步行动场景，无文字",
+        },
+    ]
+    source_list = normalize_source_list(
+        [
+            {
+                "publisher": topic.source_name or "手动输入",
+                "title": title_text,
+                "published_at": topic.captured_at,
+                "url": source_url,
+            }
+        ]
+    )
+    ai_statement = "AI辅助声明：文本模型调用失败，当前内容为软件根据用户手动话题生成的可编辑基础框架，发布前请补充事实、案例和来源。"
+    article = {
+        "title": title,
+        "intro": intro,
+        "summary": summary or intro,
+        "sections": sections,
+        "source_list": source_list,
+        "source_statement": "\n\n".join(source_list),
+        "ai_statement": ai_statement,
+        "fact_basis": [],
+        "body_char_count": 0,
+        "text_generation_calls": 1,
+        "text_generation_limit": 1,
+        "text_generation_second_call_reason": "",
+        "recommended_status": "review_required",
+        "fallback_reason": reason,
+        "fallback_kind": "custom_topic_fallback",
+        "response_format_warning": True,
+        "format_warning": "文本模型调用失败，当前展示的是可编辑基础框架。建议检查模型配置后点击“使用文本模型重新生成”。",
+        "fallback_complete": True,
+        "content_markdown": "",
+    }
+    markdown_parts = [f"# {title}", intro]
+    for section in sections:
+        markdown_parts.append(f"## {section['heading']}\n{section['body']}")
+    if source_list:
+        markdown_parts.append("## 资料来源\n" + "\n\n".join(source_list))
+    markdown_parts.append(ai_statement)
+    article["content_markdown"] = "\n\n".join(part for part in markdown_parts if part).strip()
+    article["body_char_count"] = sum(1 for ch in article["content_markdown"] if "\u4e00" <= ch <= "\u9fff")
+    return article
+
+
 def _article_requires_review(article: dict[str, Any], gate: dict[str, Any], removed_claims: list[str], used_fallback: bool) -> bool:
     return bool(used_fallback or removed_claims or str(article.get("recommended_status") or "") != "completed" or str(gate.get("status") or "") == "warning")
 
@@ -698,7 +866,10 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
         text_timeout_limit = min(70, max(25, int(text_profile.get("timeout_seconds") or (settings.get("network") or {}).get("timeout_seconds") or 70)))
         effective_text_profile = dict(text_profile)
         effective_text_profile["timeout_seconds"] = text_timeout_limit
+        if bool(effective_text_profile.get("has_api_key")) and not str(effective_text_profile.get("api_key") or "").strip():
+            return _failure(state, store, "generating_article", ProviderError("TEXT_KEY_LOAD_FAILED", "已保存的文本密钥无法读取，请重新保存文本配置。"), "failed")
         state["model_info"] = {"text": _safe_model_info(effective_text_profile), "image": _safe_model_info(image_profile)}
+        state["text_model_name"] = str(effective_text_profile.get("model") or effective_text_profile.get("name") or "")
         state.update({"status": "running", "stage": "collecting_research" if run_article else "generating_image_prompt", "progress": 5 if run_article else 55, "failed_step": None, "error_code": "", "safe_error_message": "", "next_retry_at": None})
         _persist(state, store)
         _check_cancel(task["task_id"])
@@ -724,9 +895,10 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
         bundle = _auto_collect_research(state, store, topic)
         accepted_source_count = int((bundle or {}).get("accepted_source_count") or 0)
         limited_research_mode = _is_hotlist_limited_bundle(bundle)
+        custom_topic_mode = _is_custom_topic_bundle(bundle)
         if not bundle:
             return _quality_block(state, store, bundle or {"research_status": "not_collected", "topic_id": topic.id, "topic_title": topic.title}, "有效资料来源为 0，无法生成文章。", "RESEARCH_NOT_COLLECTED")
-        if accepted_source_count <= 0 and not limited_research_mode:
+        if accepted_source_count <= 0 and not limited_research_mode and not custom_topic_mode:
             return _quality_block(state, store, bundle, "有效资料来源为 0，无法生成文章。", "RESEARCH_NOT_COLLECTED")
         angle = state.get("angle_plan") or (options.get("angle_plan") if isinstance(options.get("angle_plan"), dict) else None) or plan_for_topic(1)[0]
         state["article_plan"] = sanitize_json({"angle": angle.get("name"), "core_question": angle.get("core_question"), "opening_strategy": angle.get("opening_strategy"), "structure": angle.get("structure") or [], "reader_value": angle.get("instruction")})
@@ -742,17 +914,32 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
             state["fallback_notice"] = ""
             generation_stats = {"text_generation_calls": 0, "text_generation_limit": 2 if rewrite_context else 1, "text_generation_second_call_reason": ""}
             try:
+                state["text_model_started_at"] = utc_now()
+                state["text_model_finished_at"] = None
+                state["provider_error_code"] = ""
+                state["provider_error_message"] = ""
+                _persist(state, store)
                 article = generate_article(topic, angle, article_type, style, word_count, effective_text_profile, demo_mode=False, app_mode="production", network_settings=settings.get("network"), rewrite_context=rewrite_context, research_bundle=bundle, generation_stats=generation_stats)
+                state["text_model_finished_at"] = utc_now()
+                state["text_generation_result"] = "success"
                 if str(article.get("recommended_status") or "") == "too_short":
                     raise ProviderError("ARTICLE_TOO_SHORT", "\u6a21\u578b\u8fd4\u56de\u6b63\u6587\u8fc7\u77ed")
             except ProviderError as exc:
+                state["text_model_finished_at"] = utc_now()
+                state["provider_error_code"] = str(exc.code)
+                state["provider_error_message"] = redact_sensitive_text(str(getattr(exc, "detail", exc)))[:500]
                 if exc.code not in {"TIMEOUT", "ARTICLE_TOO_SHORT", "MODEL_OUTPUT_INVALID", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED"}:
                     raise
                 used_fallback = True
-                article = _build_local_fallback_article(topic, angle, article_type, style, bundle, exc.code)
+                state["text_generation_result"] = "fallback"
+                if custom_topic_mode:
+                    article = _build_custom_topic_fallback_article(topic, angle, article_type, style, exc.code)
+                    state["fallback_notice"] = "本篇未使用文本模型正式正文\n原因：文本模型调用失败，当前展示可编辑基础框架。建议检查模型配置后点击“使用文本模型重新生成”。"
+                else:
+                    article = _build_local_fallback_article(topic, angle, article_type, style, bundle, exc.code)
                 if limited_research_mode:
                     state["fallback_notice"] = "已生成谨慎基础稿\n当前仅获取到热榜元数据，发布前请补充核对权威来源。"
-                else:
+                elif not custom_topic_mode:
                     state["fallback_notice"] = "\u5df2\u751f\u6210\u57fa\u7840\u7a3f\n\u5f53\u524d\u6a21\u578b\u8fd4\u56de\u5f02\u5e38\uff0c\u8f6f\u4ef6\u5df2\u6839\u636e\u516c\u5f00\u8d44\u6599\u751f\u6210\u53ef\u7f16\u8f91\u7248\u672c\u3002"
 
             def _finalize_article_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -781,6 +968,15 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
             state["text_generation_calls"] = int(article.get("text_generation_calls") or generation_stats.get("text_generation_calls") or (0 if used_fallback else 1))
             state["text_generation_limit"] = int(article.get("text_generation_limit") or generation_stats.get("text_generation_limit") or 1)
             state["text_generation_second_call_reason"] = str(article.get("text_generation_second_call_reason") or generation_stats.get("text_generation_second_call_reason") or "")
+            state["fallback_reason"] = str(article.get("fallback_reason") or "")
+            state["fallback_kind"] = str(article.get("fallback_kind") or "")
+            article["text_model_name"] = state.get("text_model_name") or ""
+            article["text_model_started_at"] = state.get("text_model_started_at")
+            article["text_model_finished_at"] = state.get("text_model_finished_at")
+            article["provider_error_code"] = state.get("provider_error_code") or ""
+            article["provider_error_message"] = state.get("provider_error_message") or ""
+            article["fallback_kind"] = article.get("fallback_kind") or state.get("fallback_kind") or ""
+            article["fallback_reason"] = article.get("fallback_reason") or state.get("fallback_reason") or ""
             article["source_statement"] = article.get("source_statement") or "\uff1b".join(str(item) for item in article.get("source_list") or [])
             if not used_fallback and article.get("response_format_warning") and not state.get("fallback_notice"):
                 state["fallback_notice"] = "\u6587\u7ae0\u5df2\u751f\u6210\uff0c\u4f46\u6a21\u578b\u8fd4\u56de\u683c\u5f0f\u4e0d\u6807\u51c6\uff0c\u5df2\u81ea\u52a8\u8f6c\u6362\u4e3a\u53ef\u7f16\u8f91\u6587\u7ae0\u3002"

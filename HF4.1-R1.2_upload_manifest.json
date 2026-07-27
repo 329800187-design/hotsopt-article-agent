@@ -1,0 +1,101 @@
+{
+  "release": "RC1.3.3-Lite-P1-HF4.1-R1.2",
+  "created_at": "2026-07-27T08:13:26.438845+00:00",
+  "setup": {
+    "filename": "热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Setup.exe",
+    "sha256": "cb068e89f09a8cf2717846e02591c5949f5aa5091ed0af028a0b4226bda6c096",
+    "size": 60792979
+  },
+  "customer_package": {
+    "filename": "热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_客户交付包.zip",
+    "sha256": "74722a5d7d554fba6bbe6b88599208399a9fd07fc73414f8adda6e079ea5b799"
+  },
+  "source": {
+    "filename": "热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Source.zip",
+    "sha256": "711a783062a41f26da64a36507b12b9d80611456cbd344168489b3cd9ed49f78"
+  },
+  "license_admin_zip": {
+    "filename": "热点图文工作台_本地许可证签发工具.zip",
+    "sha256": "ac33123c2b82a1c786d985d4aff5bc93aff08f6f2c9bc3b690f2b268314953c8",
+    "size": 22933
+  },
+  "license_admin_exe": {
+    "filename": "热点图文工作台_本地许可证签发工具.exe",
+    "sha256": "1ff53cf7b33e5617c7b96a0924e5c640cf211d6dc5920be0604961d25d9411c8",
+    "size": 17408
+  },
+  "evidence_package": {
+    "filename": "RC1.3.3-Lite-P1-HF4.1-R1.2_真实热点证据包.zip",
+    "sha256": "cd48d7cdc01306011781d1a2841abb5ab6fae75534f0e0c3cb4a1111b3ece80e"
+  },
+  "user_flow_gui_evidence_package": {
+    "filename": "RC1.3.3-Lite-P1-HF4.1-R1.2_用户主流程GUI证据包.zip",
+    "sha256": "36fdb8ad9f1396b437c22c2ac5f34df831e723cd9c00e7a62d23cb06d5eaa1c9"
+  },
+  "install_uninstall_check": {
+    "INNO_SETUP_INSTALL_PASS": true,
+    "WINDOWS_APPS_ENTRY_PASS": true,
+    "INNO_UNINSTALL_REAL_PASS": true,
+    "INSTALL_DIR_REMOVED_PASS": true,
+    "USER_DATA_PRESERVED_PASS": true,
+    "install_returncode": 0,
+    "uninstall_returncode": 0,
+    "install_dir": "C:\\Users\\lenovo\\AppData\\Local\\Programs\\热点图文批量生产工作台",
+    "data_dir": "C:\\Users\\lenovo\\AppData\\Local\\热点图文批量生产工作台"
+  },
+  "test_record": {
+    "release": "RC1.3.3-Lite-P1-HF4.1-R1.2",
+    "created_at": "2026-07-27T08:15:32.098864+00:00",
+    "py_compile": {
+      "command": "python -m compileall -q generation export license_admin modules scripts tests api.py desktop_host.py ui",
+      "exit_code": 0
+    },
+    "pytest": {
+      "command": "python -m pytest tests\\test_p1_hf4_1_r1_2_manual_export.py tests\\test_p1_hf3_json_fallback.py tests\\test_p1_hf4_content_layout_speed.py tests\\test_p1_hf4_1_r1_1_runtime.py -q --basetemp .pytest_tmp_hf4_1_r1_2",
+      "exit_code": 0,
+      "result": "23 passed in 5.91s"
+    },
+    "gates": {
+      "MANUAL_TOPIC_CUSTOM_TOPIC_PASS": true,
+      "MANUAL_TOPIC_TEXT_MODEL_CALL_PASS": true,
+      "MANUAL_TOPIC_NOT_HOTLIST_TEMPLATE_PASS": true,
+      "MANUAL_TOPIC_TIMEOUT_CUSTOM_FALLBACK_PASS": true,
+      "HOTLIST_ZERO_SOURCE_STILL_LIMITED_PASS": true,
+      "DESKTOP_DOWNLOADS_ENABLED_PASS": true,
+      "DESKTOP_WORD_SAVE_DIALOG_PASS": true,
+      "DESKTOP_ZIP_SAVE_DIALOG_PASS": true,
+      "SAVED_WORD_OPENS_PASS": true,
+      "TEXT_KEY_LOAD_FAILED_PASS": true
+    },
+    "post_build_checks": {
+      "runtime_zip_hotfix_check": "PASS",
+      "source_zip_security_check": "PASS"
+    },
+    "build_result": "passed"
+  },
+  "status": "RC1.3.3-Lite-P1-HF4.1-R1.2 手动话题、真实文本生成与桌面导出热修完成，等待用户最后一次文章和图片复测。",
+  "post_build_checks": {
+    "runtime_zip_hotfix_check": {
+      "release": "RC1.3.3-Lite-P1-HF4.1-R1.2",
+      "runtime_zip": "热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Windows运行包.zip",
+      "checked_at": "2026-07-27T08:15:32.095198+00:00",
+      "manual_topic_detector": true,
+      "custom_topic_fallback": true,
+      "text_key_hard_error": true,
+      "desktop_downloads_enabled": true,
+      "text_model_status_ui": true,
+      "single_export_buttons": true,
+      "exportable_statuses_api": true,
+      "batch_final_ready_relaxed": true,
+      "status": "PASS"
+    },
+    "source_zip_security_check": {
+      "release": "RC1.3.3-Lite-P1-HF4.1-R1.2",
+      "source_zip": "热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Source.zip",
+      "checked_at": "2026-07-27T08:15:32.098864+00:00",
+      "file_count": 247,
+      "forbidden_entries": [],
+      "status": "PASS"
+    }
+  }
+}

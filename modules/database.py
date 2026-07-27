@@ -399,9 +399,10 @@ class SQLiteStore:
             return "failed"
         status_set = set(statuses)
         active = {"queued", "running", "retry_waiting"}
+        exportable = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
         if status_set & active:
             return "running"
-        if status_set == {"completed"}:
+        if status_set and status_set.issubset(exportable):
             return "completed"
         if status_set == {"cancelled"}:
             return "cancelled"
@@ -440,6 +441,7 @@ class SQLiteStore:
                 return
             statuses = [redact_sensitive_text(str(row[1] or "queued")) for row in rows]
             counts = {key: statuses.count(key) for key in ("queued", "running", "completed", "failed", "cancelled", "partial_success")}
+            exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
             status = self._summarize_batch_status(statuses)
             current = connection.execute("SELECT status,started_at,completed_at,state_version,mode,quality_status FROM generation_batches WHERE batch_id=?", (batch_id,)).fetchone()
             if not current:
@@ -447,11 +449,11 @@ class SQLiteStore:
             quality_status = str(current[5] or ("pending" if current[4] == "single_topic_multi_angle" else "not_applicable"))
             final_ready = 0
             if status == "completed":
-                if current[4] == "single_topic_multi_angle" and quality_status not in {"passed", "review_required", "not_applicable"}:
+                if quality_status == "failed":
                     status = "running"
                     completed_at = None
                 else:
-                    final_ready = 1
+                    final_ready = int(any(item in exportable_statuses for item in statuses) and all(item in exportable_statuses or item == "cancelled" for item in statuses))
             started_at = current[1] or (utc_now() if status in {"running", "completed", "failed", "cancelled", "partial_success"} else None)
             completed_at = current[2] or (utc_now() if status in {"completed", "failed", "cancelled", "partial_success"} else None)
             if status == "running":

@@ -22,6 +22,13 @@ REQUIRED_SECTION_HEADINGS = (
     "可能带来哪些影响",
     "后续值得关注什么",
 )
+CUSTOM_TOPIC_SECTION_HEADINGS = (
+    "核心概念",
+    "可执行方法",
+    "具体步骤",
+    "风险提醒",
+    "总结",
+)
 
 
 def _demo_article(topic: HotTopic, angle: dict[str, str], style: str, word_count: int) -> dict[str, Any]:
@@ -79,12 +86,13 @@ def _accepted_sources(research_bundle: dict[str, Any] | None) -> list[dict[str, 
     if not research_bundle:
         return []
     limited_mode = bool(research_bundle.get("hotlist_metadata_available") and str(research_bundle.get("research_status") or "") == "hotlist_limited")
+    custom_topic_mode = bool(research_bundle.get("custom_topic") and str(research_bundle.get("research_status") or "") == "custom_topic")
     return [
         item
         for item in research_bundle.get("sources") or []
         if isinstance(item, dict)
         and item.get("fetch_success")
-        and (item.get("accepted_for_research") or (limited_mode and item.get("limited_metadata")))
+        and (item.get("accepted_for_research") or (limited_mode and item.get("limited_metadata")) or (custom_topic_mode and item.get("custom_topic_input")))
         and not item.get("duplicate_of")
     ]
 
@@ -174,9 +182,11 @@ def _fact_card_block(research_bundle: dict[str, Any] | None) -> str:
     people = "\uff1b".join(str(item) for item in (research_bundle.get("key_people") or [])[:5]) or none_value
     orgs = "\uff1b".join(str(item) for item in (research_bundle.get("key_organizations") or [])[:5]) or none_value
     notice = str(research_bundle.get("limited_research_notice") or "").strip()
+    custom_notice = str(research_bundle.get("custom_topic_notice") or "").strip()
     return (
         f"\u516c\u5f00\u8d44\u6599\u6574\u7406\u72b6\u6001\uff1a{research_bundle.get('research_status')}\n"
         f"{notice + chr(10) if notice else ''}"
+        f"{custom_notice + chr(10) if custom_notice else ''}"
         f"\u5173\u952e\u4e8b\u5b9e\u5361\uff08\u6700\u591a10\u6761\uff09\uff1a\n{fact_lines or none_value}\n"
         f"\u80cc\u666f\u4e8b\u5b9e\u5361\uff08\u6700\u591a5\u6761\uff09\uff1a\n{background_lines or none_value}\n"
         f"\u8d44\u6599\u6765\u6e90\u76ee\u5f55\uff08\u6700\u591a3\u6761\uff0c\u4ec5\u4f9b\u7f72\u540d\uff0c\u4e0d\u5f97\u590d\u8ff0\u539f\u6587\uff09\uff1a\n{source_lines or none_value}\n"
@@ -313,12 +323,18 @@ def _generic_paragraph(topic: HotTopic, heading: str) -> str:
         "为什么受到关注": "这一话题受到关注，通常与事件本身的信息密度、涉及群体以及后续解释空间有关。从现有信息看，读者需要先区分已经披露的事实、仍待核实的细节和网络讨论中的判断。",
         "可能带来哪些影响": "在缺少更多权威信息前，影响分析应保持克制。它可能影响公众对相关议题的理解，也可能推动更多机构、媒体或当事方补充说明，但具体结果仍需等待后续公开材料确认。",
         "后续值得关注什么": "后续可重点关注权威渠道是否发布进一步说明，原始来源是否补充时间、地点、责任边界和处理进展。发布前仍建议核对人物、时间、数字和来源链接。",
+        "核心概念": f"围绕“{topic.title}”，需要先说明它能解决什么问题、适合什么人，以及最终应交付什么结果。",
+        "可执行方法": "可以从低成本、小范围、可复用的方向入手，把工具能力转化为服务、内容或流程，而不是只停留在概念介绍。",
+        "具体步骤": "建议先选择一个具体场景，做出样例，找到目标用户，完成一次小规模交付，再根据反馈调整流程和报价。",
+        "风险提醒": "需要控制投入成本、交付承诺和合规边界。涉及数据、版权、合同或平台规则时，应保留人工核对环节。",
+        "总结": "先跑通一个小闭环，再逐步扩大投入。后续可继续补充案例、工具清单和真实成本。",
     }
     return templates.get(heading, "目前公开信息有限，后续仍需等待权威信息确认。")
 
 
-def _complete_article_structure(article: dict[str, Any], topic: HotTopic, angle: dict[str, str]) -> dict[str, Any]:
+def _complete_article_structure(article: dict[str, Any], topic: HotTopic, angle: dict[str, str], required_headings: tuple[str, ...] | None = None) -> dict[str, Any]:
     result = dict(article)
+    headings = required_headings or REQUIRED_SECTION_HEADINGS
     title = str(result.get("title") or "").strip()
     original_title = str(getattr(topic, "title", "") or "").strip()
     angle_name = str(angle.get("name") or "热点解读").strip()
@@ -336,7 +352,7 @@ def _complete_article_structure(article: dict[str, Any], topic: HotTopic, angle:
     unused: list[dict[str, Any]] = []
     for section in raw_sections:
         heading = str(section.get("heading") or "").strip()
-        matched = next((required for required in REQUIRED_SECTION_HEADINGS if required in heading or heading in required), "")
+        matched = next((required for required in headings if required in heading or heading in required), "")
         if matched and matched not in merged_by_heading:
             item = dict(section)
             item["heading"] = matched
@@ -346,7 +362,7 @@ def _complete_article_structure(article: dict[str, Any], topic: HotTopic, angle:
 
     paragraphs = _paragraphs_from_sections(raw_sections)
     completed: list[dict[str, Any]] = []
-    for index, heading in enumerate(REQUIRED_SECTION_HEADINGS):
+    for index, heading in enumerate(headings):
         section = dict(merged_by_heading.get(heading) or {})
         body = str(section.get("body") or "").strip()
         if not body and index < len(unused):
@@ -698,7 +714,15 @@ def generate_article(
         article.get("ai_statement")
         or "AI\u8f85\u52a9\u58f0\u660e\uff1a\u672c\u6587\u57fa\u4e8e\u516c\u5f00\u8d44\u6599\u6574\u7406\u751f\u6210\uff0c\u53d1\u5e03\u524d\u8bf7\u518d\u6b21\u6838\u5bf9\u5173\u952e\u4fe1\u606f\u3002"
     ).strip()
-    article = _complete_article_structure(article, topic, angle)
+    required_headings = (
+        CUSTOM_TOPIC_SECTION_HEADINGS
+        if bool(
+            (research_bundle or {}).get("custom_topic")
+            and str((research_bundle or {}).get("research_status") or "") == "custom_topic"
+        )
+        else REQUIRED_SECTION_HEADINGS
+    )
+    article = _complete_article_structure(article, topic, angle, required_headings)
     article["word_count"] = requested_word_count
     article["body_char_count"] = count_body_chinese_chars(article)
     fallback_complete = bool(article.get("fallback_complete"))

@@ -1,0 +1,30 @@
+{
+  "release": "RC1.3.3-Lite-P1-HF4.1-R1.2",
+  "created_at": "2026-07-27T08:15:32.098864+00:00",
+  "py_compile": {
+    "command": "python -m compileall -q generation export license_admin modules scripts tests api.py desktop_host.py ui",
+    "exit_code": 0
+  },
+  "pytest": {
+    "command": "python -m pytest tests\\test_p1_hf4_1_r1_2_manual_export.py tests\\test_p1_hf3_json_fallback.py tests\\test_p1_hf4_content_layout_speed.py tests\\test_p1_hf4_1_r1_1_runtime.py -q --basetemp .pytest_tmp_hf4_1_r1_2",
+    "exit_code": 0,
+    "result": "23 passed in 5.91s"
+  },
+  "gates": {
+    "MANUAL_TOPIC_CUSTOM_TOPIC_PASS": true,
+    "MANUAL_TOPIC_TEXT_MODEL_CALL_PASS": true,
+    "MANUAL_TOPIC_NOT_HOTLIST_TEMPLATE_PASS": true,
+    "MANUAL_TOPIC_TIMEOUT_CUSTOM_FALLBACK_PASS": true,
+    "HOTLIST_ZERO_SOURCE_STILL_LIMITED_PASS": true,
+    "DESKTOP_DOWNLOADS_ENABLED_PASS": true,
+    "DESKTOP_WORD_SAVE_DIALOG_PASS": true,
+    "DESKTOP_ZIP_SAVE_DIALOG_PASS": true,
+    "SAVED_WORD_OPENS_PASS": true,
+    "TEXT_KEY_LOAD_FAILED_PASS": true
+  },
+  "post_build_checks": {
+    "runtime_zip_hotfix_check": "PASS",
+    "source_zip_security_check": "PASS"
+  },
+  "build_result": "passed"
+}

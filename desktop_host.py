@@ -514,6 +514,7 @@ class DesktopHost:
             self.desktop_preflight()
             import webview
 
+            webview.settings["ALLOW_DOWNLOADS"] = True
             self.window = webview.create_window(WINDOW_TITLE, html=STARTUP_HTML, width=1280, height=820, min_size=(1200, 760), resizable=True, text_select=True)
             self.window.events.closed += self._on_window_closed
             threading.Thread(target=self._boot_and_navigate, name="desktop-backend", daemon=True).start()

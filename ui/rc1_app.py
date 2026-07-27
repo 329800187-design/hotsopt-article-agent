@@ -290,6 +290,46 @@ def _open_export_location() -> None:
         st.error("保存位置暂时无法打开，请稍后重试。")
 
 
+def _seconds_between(start: Any, end: Any) -> int:
+    try:
+        from datetime import datetime
+
+        left = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        right = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+        return max(0, int((right - left).total_seconds()))
+    except Exception:
+        return 0
+
+
+def _render_text_generation_status(state: dict[str, Any], task_id: str, restricted: bool) -> None:
+    calls = int(state.get("text_generation_calls") or 0)
+    model = str(state.get("text_model_name") or ((state.get("model_info") or {}).get("text") or {}).get("model") or "未命名模型")
+    fallback_kind = str(state.get("fallback_kind") or "")
+    provider_code = str(state.get("provider_error_code") or state.get("fallback_reason") or "")
+    provider_message = str(state.get("provider_error_message") or state.get("fallback_notice") or "")
+    elapsed = _seconds_between(state.get("text_model_started_at"), state.get("text_model_finished_at"))
+    if fallback_kind:
+        st.warning("本篇未使用文本模型正式正文")
+        st.caption(f"原因：{provider_code or '模型调用失败'}")
+        if provider_message:
+            st.caption(provider_message)
+        st.caption("当前展示可编辑基础框架")
+        if not restricted:
+            cols = st.columns(2)
+            if cols[0].button("使用文本模型重新生成", key=f"rc112_text_retry_{task_id}"):
+                _api("POST", f"/tasks/{task_id}/retry-article")
+                st.rerun()
+            if cols[1].button("打开模型设置", key=f"rc112_open_model_settings_{task_id}"):
+                _navigate_to("⚙ 模型设置")
+                st.rerun()
+    elif calls:
+        st.success("文本模型生成成功")
+        st.caption(f"模型：{model}")
+        st.caption(f"调用次数：{calls}")
+        if elapsed:
+            st.caption(f"耗时：{elapsed}秒")
+
+
 def _edit_fingerprint(changes: dict[str, Any]) -> str:
     return hashlib.sha256(repr(changes).encode("utf-8")).hexdigest()
 
@@ -1138,6 +1178,7 @@ def _content(restricted: bool = False) -> None:
                             selected_delete_ids.append(task_id)
                     if state.get("fallback_notice"):
                         st.warning(state["fallback_notice"])
+                    _render_text_generation_status(state, task_id, restricted)
                     if str(task.get("status") or state.get("status") or "") == "failed":
                         _render_failed_task_panel(str(batch.get("batch_id") or ""), task_id, state, restricted)
                     gate = state.get("quality_gate") or {}
@@ -1171,6 +1212,8 @@ def _content(restricted: bool = False) -> None:
                         if state.get("status") in exportable_statuses and gate.get("status") != "failed" and layout_ok:
                             _download(f"/tasks/{task_id}/export/word", f"{article.get('title') or '文章'}.docx", "导出 Word", f"rc1_word_{task_id}")
                             _download(f"/tasks/{task_id}/export/zip", f"{article.get('title') or '文章'}.zip", "导出单篇 ZIP", f"rc1_zip_{task_id}")
+                            if st.button("打开保存位置", key=f"rc1_open_export_item_{task_id}"):
+                                _open_export_location()
                         else:
                             st.info("文章尚未通过质量门禁，暂不能作为正式成品导出。")
                         if article.get("source_list"):

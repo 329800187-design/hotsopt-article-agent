@@ -439,6 +439,7 @@ def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None
     markdown = str(article.get("content_markdown") or "")
     accepted_source_count = int(bundle.get("accepted_source_count") or 0)
     limited_research_mode = bool(bundle.get("hotlist_metadata_available") and str(bundle.get("research_status") or "") == "hotlist_limited")
+    custom_topic_mode = bool(bundle.get("custom_topic") and str(bundle.get("research_status") or "") == "custom_topic")
     trace = metrics.get("fact_trace") or {}
 
     if not markdown.strip():
@@ -446,6 +447,8 @@ def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None
     if accepted_source_count <= 0:
         if limited_research_mode:
             warning_reasons.append("当前仅获取到热榜标题和有限元数据，发布前请补充核对权威来源。")
+        elif custom_topic_mode:
+            warning_reasons.append("当前为用户手动输入话题，未使用公开资料来源；发布前请按需要补充案例、数据和参考链接。")
         else:
             hard_reasons.append("没有找到可用公开资料来源")
 
