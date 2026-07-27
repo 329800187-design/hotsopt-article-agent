@@ -11,6 +11,7 @@ from license_admin.signing_identity import private_key_path, public_key_path, pu
 
 def initialize() -> tuple[Path, Path]:
     private_path = private_key_path()
+    public_path = public_key_path()
     private_path.parent.mkdir(parents=True, exist_ok=True)
     if private_path.exists():
         private = serialization.load_pem_private_key(private_path.read_bytes(), password=None)

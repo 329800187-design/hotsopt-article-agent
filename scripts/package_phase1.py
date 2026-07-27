@@ -27,6 +27,9 @@ RUNTIME_PARTS = {".venv", "__pycache__", ".pytest_cache", ".pytest-tmp", ".tmp",
 
 
 def should_copy(path: Path) -> bool:
+    parts = path.parts
+    if len(parts) >= 2 and parts[0] == "export" and parts[1] in {"user", "batches"}:
+        return False
     if path.suffix.lower() == ".license":
         return False
     if path.name.startswith("Windows") and "RC1.3" in path.name:

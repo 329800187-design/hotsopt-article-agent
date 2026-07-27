@@ -10,7 +10,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
-from export.layout_pipeline import ensure_article_layout
+from export.layout_pipeline import prepare_article_layout
 
 DEFAULT_FONT = "宋体"
 TITLE_FONT = "黑体"
@@ -111,7 +111,7 @@ def _configure(document: Document) -> None:
     subtitle.font.name = SUBTITLE_FONT
     subtitle._element.rPr.rFonts.set(qn("w:eastAsia"), SUBTITLE_FONT)
     subtitle.font.size = Pt(12)
-    subtitle.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    subtitle.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
     subtitle.paragraph_format.space_after = Pt(10)
 
     heading = document.styles["Heading 1"]
@@ -139,11 +139,13 @@ def _add_source_paragraph(document: Document, source: str) -> None:
     first = document.add_paragraph(lines[0])
     first.paragraph_format.space_after = Pt(2)
     first.paragraph_format.first_line_indent = Pt(0)
+    first.alignment = WD_ALIGN_PARAGRAPH.LEFT
     _set_paragraph_font(first, SOURCE_FONT, 10)
     for line in lines[1:]:
         paragraph = document.add_paragraph()
         paragraph.paragraph_format.space_after = Pt(6)
         paragraph.paragraph_format.first_line_indent = Pt(0)
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
         if line.startswith("原文链接："):
             label, _, url = line.partition("：")
             run = paragraph.add_run(f"{label}：")
@@ -155,7 +157,7 @@ def _add_source_paragraph(document: Document, source: str) -> None:
 
 
 def _add_article_content(document: Document, article: dict[str, Any], base_dir: Path | None) -> None:
-    article = ensure_article_layout(article)
+    article = prepare_article_layout(article)
     heading = document.add_paragraph(article["title"], style="Title")
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_paragraph_font(heading, TITLE_FONT, 20, bold=True)
@@ -163,9 +165,9 @@ def _add_article_content(document: Document, article: dict[str, Any], base_dir: 
     subtitle = str(article.get("subtitle") or article.get("intro") or "").strip()
     if subtitle:
         paragraph = document.add_paragraph(subtitle, style="Subtitle")
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
         paragraph.paragraph_format.space_after = Pt(10)
-        _set_paragraph_font(paragraph, SUBTITLE_FONT, 12, color="666666")
+        _set_paragraph_font(paragraph, SUBTITLE_FONT, 12)
 
     cover = next((item for item in article.get("images") or [] if item.get("role") == "cover" and item.get("status") == "completed"), None)
     if cover:
@@ -206,7 +208,8 @@ def _add_article_content(document: Document, article: dict[str, Any], base_dir: 
         paragraph.paragraph_format.first_line_indent = Pt(0)
         _set_paragraph_font(paragraph, SOURCE_FONT, 10)
 
-    ai_notice = document.add_paragraph("AI辅助声明：本文为公开资料整理稿，发布前请再次核对来源、图片与关键信息。")
+    ai_text = str(article.get("ai_statement") or "AI辅助声明：本文为公开资料整理稿，发布前请再次核对来源、图片与关键信息。").strip()
+    ai_notice = document.add_paragraph(ai_text)
     ai_notice.paragraph_format.first_line_indent = Pt(0)
     ai_notice.paragraph_format.space_before = Pt(10)
     ai_notice.paragraph_format.space_after = Pt(0)

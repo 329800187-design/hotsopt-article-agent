@@ -279,12 +279,102 @@ def _quality_block(state: dict[str, Any], store: SQLiteStore, bundle: dict[str, 
     return _persist(state, store)
 
 
+def _has_hotlist_metadata(topic: HotTopic) -> bool:
+    fields = (
+        topic.title,
+        topic.summary,
+        topic.source_name,
+        topic.source_url,
+        topic.hot_value,
+        topic.raw_data,
+    )
+    return any(str(value or "").strip() for value in fields)
+
+
+def _is_hotlist_limited_bundle(bundle: dict[str, Any] | None) -> bool:
+    return bool(bundle and bundle.get("hotlist_metadata_available") and str(bundle.get("research_status") or "") == "hotlist_limited")
+
+
+def _build_hotlist_limited_bundle(topic: HotTopic, original_bundle: dict[str, Any] | None = None, error: str = "") -> dict[str, Any]:
+    original_bundle = original_bundle or {}
+    source_name = str(topic.source_name or topic.source or "热榜来源").strip()
+    title = str(topic.title or "未命名热点").strip()
+    summary = str(topic.summary or "").strip()
+    captured_at = str(topic.captured_at or "").strip()
+    hot_value = str(topic.hot_value or "").strip()
+    source_url = str(topic.source_url or "").strip()
+    known_lines = [f"热榜标题：{title}"]
+    if summary:
+        known_lines.append(f"热榜摘要：{summary}")
+    if source_name:
+        known_lines.append(f"热榜来源：{source_name}")
+    if hot_value:
+        known_lines.append(f"热度信息：{hot_value}")
+    if captured_at:
+        known_lines.append(f"抓取时间：{captured_at}")
+    fact_text = "；".join(known_lines)
+    source = {
+        "source_id": "hotlist-metadata",
+        "source_name": source_name,
+        "publisher": source_name,
+        "title": title,
+        "published_at": captured_at,
+        "url": source_url,
+        "summary": summary or title,
+        "content": summary or title,
+        "fetch_success": True,
+        "accepted_for_research": False,
+        "limited_metadata": True,
+        "source_level": "hotlist_metadata",
+    }
+    fact_card = {
+        "fact_id": "hotlist-metadata-fact",
+        "subject": title,
+        "action": "进入热榜关注",
+        "object": summary or title,
+        "time": captured_at,
+        "location": "",
+        "number": hot_value,
+        "source_name": source_name,
+        "source_url": source_url,
+        "canonical_fact": fact_text,
+        "fact": fact_text,
+        "source_ids": ["hotlist-metadata"],
+        "supporting_source_ids": ["hotlist-metadata"],
+        "verification_type": "hotlist_metadata",
+        "reliability": "limited",
+    }
+    bundle = {
+        **original_bundle,
+        "topic_id": topic.id,
+        "topic_title": title,
+        "research_status": "hotlist_limited",
+        "hotlist_metadata_available": True,
+        "accepted_source_count": 0,
+        "official_or_reliable_source_count": 0,
+        "usable_fact_count": 1,
+        "candidate_link_count": int(original_bundle.get("candidate_link_count") or 0),
+        "rejected_source_count": int(original_bundle.get("rejected_source_count") or 0),
+        "sources": [source],
+        "usable_facts": [fact_card],
+        "verified_facts": [],
+        "research_fact_cards": [fact_card],
+        "background": ["目前公开资料有限，需要发布前继续核对权威信息。"],
+        "follow_up": ["后续仍需关注权威来源是否发布更完整说明。"],
+        "open_questions": ["事件主体、时间、数据和后续处置仍需以权威来源确认为准。"],
+        "limited_research_notice": "当前仅获取到热榜标题、摘要和来源元数据，只能生成谨慎基础稿，禁止补写未经确认的人物、金额、伤亡、处罚和官方结论。",
+    }
+    if error:
+        bundle["research_error"] = redact_sensitive_text(error)[:240]
+    return bundle
+
+
 def _bundle_ready(bundle: dict[str, Any] | None) -> bool:
     if not bundle:
         return False
     accepted = int(bundle.get("accepted_source_count") or 0)
     reliable = int(bundle.get("official_or_reliable_source_count") or bundle.get("official_source_count") or 0)
-    return accepted > 0 or reliable > 0 or str(bundle.get("research_status") or "") in {"sufficient", "verified", "limited"}
+    return accepted > 0 or reliable > 0 or str(bundle.get("research_status") or "") in {"sufficient", "verified", "limited"} or _is_hotlist_limited_bundle(bundle)
 
 
 def _auto_collect_research(state: dict[str, Any], store: SQLiteStore, topic: HotTopic) -> dict[str, Any] | None:
@@ -314,6 +404,8 @@ def _auto_collect_research(state: dict[str, Any], store: SQLiteStore, topic: Hot
     _persist(state, store)
     try:
         bundle = ResearchService().collect(topic, references=reference_urls, supplemental_text=supplemental_text)
+        if int((bundle or {}).get("accepted_source_count") or 0) <= 0 and _has_hotlist_metadata(topic):
+            bundle = _build_hotlist_limited_bundle(topic, bundle)
         state["research_attempts"][-1].update({
             "status": str(bundle.get("research_status") or "unknown"),
             "candidate_link_count": int(bundle.get("candidate_link_count") or 0),
@@ -326,6 +418,20 @@ def _auto_collect_research(state: dict[str, Any], store: SQLiteStore, topic: Hot
         _persist(state, store)
         return bundle
     except Exception as exc:
+        if _has_hotlist_metadata(topic):
+            bundle = _build_hotlist_limited_bundle(topic, bundle, str(exc))
+            state["research_attempts"][-1].update({
+                "status": "hotlist_limited",
+                "error": redact_sensitive_text(str(exc))[:240],
+                "candidate_link_count": int(bundle.get("candidate_link_count") or 0),
+                "accepted_source_count": 0,
+                "rejected_source_count": int(bundle.get("rejected_source_count") or 0),
+            })
+            state["research_bundle"] = sanitize_json(bundle)
+            state["research_status"] = "hotlist_limited"
+            state.update({"stage": "research_collected", "progress": 12})
+            _persist(state, store)
+            return bundle
         state["research_attempts"][-1].update({"status": "failed", "error": redact_sensitive_text(str(exc))[:240]})
         state["research_status"] = "not_collected"
         _persist(state, store)
@@ -408,10 +514,11 @@ def _failure(state: dict[str, Any], store: SQLiteStore, step: str, error: Except
 
 def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], article_type: str, style: str, bundle: dict[str, Any] | None, reason: str) -> dict[str, Any]:
     bundle = bundle or {}
+    limited_mode = _is_hotlist_limited_bundle(bundle)
     sources = [
         item
         for item in bundle.get("sources") or []
-        if isinstance(item, dict) and item.get("fetch_success") and item.get("accepted_for_research") and not item.get("duplicate_of")
+        if isinstance(item, dict) and item.get("fetch_success") and (item.get("accepted_for_research") or (limited_mode and item.get("limited_metadata"))) and not item.get("duplicate_of")
     ]
     facts = [
         str(item.get("canonical_fact") or item.get("fact") or "").strip()
@@ -438,33 +545,58 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
             cleaned = [fallback.strip("。；;，, \n\t")]
         return "。".join(item for item in cleaned if item) + "。"
 
-    sections = [
-        {
-            "heading": "事件概览",
-            "body": _join_sentences(facts[:2], topic.summary or "当前公开资料仍在整理中，已先生成可编辑基础稿"),
-            "image_brief": "与事件概览相关的真实新闻场景，无文字",
-        },
-        {
-            "heading": "已确认信息",
-            "body": _join_sentences(facts[2:5] or timeline, "目前已确认的信息仍以公开资料和原始来源为准"),
-            "image_brief": "体现已确认信息的真实新闻场景，无文字",
-        },
-        {
-            "heading": "背景信息",
-            "body": _join_sentences(background, topic.summary or "背景信息仍在补充，建议结合原始来源继续核对"),
-            "image_brief": "体现背景信息的真实新闻场景，无文字",
-        },
-        {
-            "heading": "可能影响",
-            "body": _join_sentences(impact_hints or background, "根据现有公开资料，这一进展可能影响后续观察与公众理解"),
-            "image_brief": "体现可能影响的真实新闻场景，无文字",
-        },
-        {
-            "heading": "后续关注",
-            "body": _join_sentences(follow_up or timeline[-2:], "后续仍需关注公开资料更新、机构说明和进一步确认信息"),
-            "image_brief": "体现后续关注方向的真实新闻场景，无文字",
-        },
-    ]
+    if limited_mode:
+        topic_hint = topic.summary or topic.title
+        sections = [
+            {
+                "heading": "事件概览",
+                "body": _join_sentences([f"根据当前热榜信息，{topic.title}正在受到关注。{topic_hint}"], "根据当前热榜信息，该事件仍处在公开信息有限阶段"),
+                "image_brief": f"{topic.title}相关的新闻现场感画面，无文字",
+            },
+            {
+                "heading": "已知信息与缺口",
+                "body": "目前可确认的信息主要来自热榜标题、摘要和来源元数据。公开资料尚不足以确认更多人物、具体时间、金额、伤亡、处罚或官方结论，发布前需要继续补充权威来源。",
+                "image_brief": "信息核对、新闻资料整理、编辑台场景，无文字",
+            },
+            {
+                "heading": "为什么受到关注",
+                "body": "从现有信息看，该热点之所以被关注，可能与公众对事件进展、相关主体回应以及后续影响的关心有关。由于资料有限，本文只做谨慎梳理，不扩大解读。",
+                "image_brief": "公众关注热点新闻的现实场景，无文字",
+            },
+            {
+                "heading": "后续值得关注什么",
+                "body": "后续仍需等待权威信息确认，包括事件主体是否发布正式说明、关键时间线是否清晰、是否存在可核验数据，以及相关平台或机构是否进一步更新。",
+                "image_brief": "后续新闻追踪、公告更新、信息确认场景，无文字",
+            },
+        ]
+    else:
+        sections = [
+            {
+                "heading": "事件概览",
+                "body": _join_sentences(facts[:2], topic.summary or "当前公开资料仍在整理中，已先生成可编辑基础稿"),
+                "image_brief": "与事件概览相关的真实新闻场景，无文字",
+            },
+            {
+                "heading": "已确认信息",
+                "body": _join_sentences(facts[2:5] or timeline, "目前已确认的信息仍以公开资料和原始来源为准"),
+                "image_brief": "体现已确认信息的真实新闻场景，无文字",
+            },
+            {
+                "heading": "背景信息",
+                "body": _join_sentences(background, topic.summary or "背景信息仍在补充，建议结合原始来源继续核对"),
+                "image_brief": "体现背景信息的真实新闻场景，无文字",
+            },
+            {
+                "heading": "可能影响",
+                "body": _join_sentences(impact_hints or background, "根据现有公开资料，这一进展可能影响后续观察与公众理解"),
+                "image_brief": "体现可能影响的真实新闻场景，无文字",
+            },
+            {
+                "heading": "后续关注",
+                "body": _join_sentences(follow_up or timeline[-2:], "后续仍需关注公开资料更新、机构说明和进一步确认信息"),
+                "image_brief": "体现后续关注方向的真实新闻场景，无文字",
+            },
+        ]
     source_list = normalize_source_list(
         [
             {
@@ -479,6 +611,10 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
     fallback_angle_name = angle.get("name") or "热点解读"
     title = f"{topic.title}：{fallback_angle_name}"
     intro = "当前模型返回异常，软件已根据已抓取公开资料生成可编辑基础稿，建议发布前继续核对关键信息。"
+    ai_statement = "AI辅助声明：当前模型返回异常，本文改由软件根据公开资料整理生成，发布前请再次核对关键信息。"
+    if limited_mode:
+        intro = "目前公开信息有限，本文根据当前热榜标题、摘要和来源元数据生成谨慎基础稿，重点说明已知信息、信息缺口和后续核对方向。"
+        ai_statement = "AI辅助声明：当前仅获取到热榜元数据，本文根据有限公开信息和AI辅助生成，发布前请核对人物、时间、数字和来源。"
     article = {
         "title": title,
         "intro": intro,
@@ -486,7 +622,7 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
         "sections": sections,
         "source_list": source_list,
         "source_statement": "\n\n".join(source_list),
-        "ai_statement": "AI辅助声明：当前模型返回异常，本文改由软件根据公开资料整理生成，发布前请再次核对关键信息。",
+        "ai_statement": ai_statement,
         "fact_basis": [],
         "body_char_count": 0,
         "text_generation_calls": 1,
@@ -494,7 +630,7 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
         "text_generation_second_call_reason": "",
         "recommended_status": "review_required",
         "fallback_reason": reason,
-        "fallback_kind": "local_research_draft",
+        "fallback_kind": "hotlist_limited_draft" if limited_mode else "local_research_draft",
         "response_format_warning": True,
         "format_warning": "已生成基础稿\n当前模型返回异常，软件已根据公开资料生成可编辑版本。",
         "fallback_complete": True,
@@ -504,7 +640,7 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
     for section in sections:
         markdown_parts.append(f"## {section['heading']}\n{section['body']}")
     if source_list:
-        markdown_parts.append("资料来源\n" + "\n\n".join(source_list))
+        markdown_parts.append("## 资料来源\n" + "\n\n".join(source_list))
     markdown_parts.append(article["ai_statement"])
     article["content_markdown"] = "\n\n".join(part for part in markdown_parts if part).strip()
     article["body_char_count"] = sum(1 for ch in article["content_markdown"] if "\u4e00" <= ch <= "\u9fff")
@@ -587,8 +723,11 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
         state["pending_image_confirmation"] = bool(requested_image_plan.get("max_calls")) and not auto_image_requested
         bundle = _auto_collect_research(state, store, topic)
         accepted_source_count = int((bundle or {}).get("accepted_source_count") or 0)
-        if not bundle or accepted_source_count <= 0:
+        limited_research_mode = _is_hotlist_limited_bundle(bundle)
+        if not bundle:
             return _quality_block(state, store, bundle or {"research_status": "not_collected", "topic_id": topic.id, "topic_title": topic.title}, "有效资料来源为 0，无法生成文章。", "RESEARCH_NOT_COLLECTED")
+        if accepted_source_count <= 0 and not limited_research_mode:
+            return _quality_block(state, store, bundle, "有效资料来源为 0，无法生成文章。", "RESEARCH_NOT_COLLECTED")
         angle = state.get("angle_plan") or (options.get("angle_plan") if isinstance(options.get("angle_plan"), dict) else None) or plan_for_topic(1)[0]
         state["article_plan"] = sanitize_json({"angle": angle.get("name"), "core_question": angle.get("core_question"), "opening_strategy": angle.get("opening_strategy"), "structure": angle.get("structure") or [], "reader_value": angle.get("instruction")})
         state.update({"stage": "planning_article", "progress": 20})
@@ -607,11 +746,14 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                 if str(article.get("recommended_status") or "") == "too_short":
                     raise ProviderError("ARTICLE_TOO_SHORT", "\u6a21\u578b\u8fd4\u56de\u6b63\u6587\u8fc7\u77ed")
             except ProviderError as exc:
-                if exc.code not in {"TIMEOUT", "ARTICLE_TOO_SHORT", "MODEL_OUTPUT_INVALID", "INVALID_RESPONSE"}:
+                if exc.code not in {"TIMEOUT", "ARTICLE_TOO_SHORT", "MODEL_OUTPUT_INVALID", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED"}:
                     raise
                 used_fallback = True
                 article = _build_local_fallback_article(topic, angle, article_type, style, bundle, exc.code)
-                state["fallback_notice"] = "\u5df2\u751f\u6210\u57fa\u7840\u7a3f\n\u5f53\u524d\u6a21\u578b\u8fd4\u56de\u5f02\u5e38\uff0c\u8f6f\u4ef6\u5df2\u6839\u636e\u516c\u5f00\u8d44\u6599\u751f\u6210\u53ef\u7f16\u8f91\u7248\u672c\u3002"
+                if limited_research_mode:
+                    state["fallback_notice"] = "已生成谨慎基础稿\n当前仅获取到热榜元数据，发布前请补充核对权威来源。"
+                else:
+                    state["fallback_notice"] = "\u5df2\u751f\u6210\u57fa\u7840\u7a3f\n\u5f53\u524d\u6a21\u578b\u8fd4\u56de\u5f02\u5e38\uff0c\u8f6f\u4ef6\u5df2\u6839\u636e\u516c\u5f00\u8d44\u6599\u751f\u6210\u53ef\u7f16\u8f91\u7248\u672c\u3002"
 
             def _finalize_article_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
                 payload["summary"] = str(payload.get("summary") or payload.get("intro") or topic.summary or "").strip()

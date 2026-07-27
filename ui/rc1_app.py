@@ -1162,10 +1162,13 @@ def _content(restricted: bool = False) -> None:
                     article = state.get("article") or {}
                     if article:
                         st.markdown(f"### {article.get('title') or '文章'}")
-                        st.write(article.get("summary") or article.get("intro") or "")
+                        if article.get("intro") or article.get("summary"):
+                            st.markdown(str(article.get("intro") or article.get("summary") or ""))
                         with st.expander("查看全文"):
                             st.markdown(article.get("content_markdown") or "")
-                        if state.get("status") == "completed" and gate.get("status") != "failed":
+                        exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
+                        layout_ok = (article.get("layout_check") or {}).get("passed", bool(article.get("content_markdown")))
+                        if state.get("status") in exportable_statuses and gate.get("status") != "failed" and layout_ok:
                             _download(f"/tasks/{task_id}/export/word", f"{article.get('title') or '文章'}.docx", "导出 Word", f"rc1_word_{task_id}")
                             _download(f"/tasks/{task_id}/export/zip", f"{article.get('title') or '文章'}.zip", "导出单篇 ZIP", f"rc1_zip_{task_id}")
                         else:
@@ -1173,7 +1176,7 @@ def _content(restricted: bool = False) -> None:
                         if article.get("source_list"):
                             with st.expander("资料来源", expanded=False):
                                 for source_line in article["source_list"]:
-                                    st.write(source_line)
+                                    st.markdown(str(source_line))
                         if state.get("status") == "completed" and gate.get("status") in {"passed", "warning"}:
                             st.markdown("#### 文章确认后再生成图片")
                             requested_mode = normalize_image_plan((state.get("generation_options") or {}).get("image_plan_mode"))

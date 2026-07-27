@@ -438,12 +438,16 @@ def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None
     warning_clauses = _soft_analysis_warning_clauses(str(article.get("content_markdown") or ""))
     markdown = str(article.get("content_markdown") or "")
     accepted_source_count = int(bundle.get("accepted_source_count") or 0)
+    limited_research_mode = bool(bundle.get("hotlist_metadata_available") and str(bundle.get("research_status") or "") == "hotlist_limited")
     trace = metrics.get("fact_trace") or {}
 
     if not markdown.strip():
         hard_reasons.append("正文内容为空")
     if accepted_source_count <= 0:
-        hard_reasons.append("没有找到可用公开资料来源")
+        if limited_research_mode:
+            warning_reasons.append("当前仅获取到热榜标题和有限元数据，发布前请补充核对权威来源。")
+        else:
+            hard_reasons.append("没有找到可用公开资料来源")
 
     if article.get("fact_basis") and not trace.get("valid", True):
         warning_reasons.extend(str(item) for item in (trace.get("invalid_reasons") or [])[:5])

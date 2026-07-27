@@ -16,8 +16,8 @@ sys.path.insert(0, str(ROOT))
 
 from scripts import build_rc1_3_1 as base
 import package_phase1
-RELEASE = "RC1.3.3-Lite-P1-HF4.1"
-STATUS = "RC1.3.3-Lite-P1-HF4.1 最终构建自检完成，等待用户真实内容、速度与交付复测。"
+RELEASE = "RC1.3.3-Lite-P1-HF4.1-R1.1"
+STATUS = "RC1.3.3-Lite-P1-HF4.1-R1.1 零来源正式运行主链热修完成，Setup已构建并安装烟测，等待用户最终文章复测。"
 PRODUCT = f"\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0_{RELEASE}"
 APP_NAME = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0"
 APP_EXE = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0.exe"
@@ -428,6 +428,59 @@ def customer_package(setup: Path, output: Path) -> Path:
         archive.writestr("\u4f7f\u7528\u8bf4\u660e.txt", instructions)
     return output
 
+
+def build_license_admin_exe(output: Path) -> Path:
+    csc = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
+    if not csc.is_file():
+        raise RuntimeError("LICENSE_ADMIN_EXE_BUILD_FAILED: csc.exe not found")
+    temporary = output.with_suffix(".tmp.exe")
+    icon = ROOT / "ui" / "assets" / "brand.ico"
+    command = [str(csc), "/nologo", "/target:winexe", f"/out:{temporary}", "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll"]
+    if icon.is_file():
+        command.append(f"/win32icon:{icon}")
+    command.append(str(ROOT / "scripts" / "license_admin_shell.cs"))
+    subprocess.run(command, cwd=ROOT, check=True, timeout=120)
+    temporary.replace(output)
+    return output
+
+
+def build_license_admin_package(output: Path) -> Path:
+    entries: dict[str, bytes] = {}
+    for source in sorted((ROOT / "license_admin").rglob("*")):
+        if source.is_file() and "__pycache__" not in source.parts and source.suffix not in {".pyc", ".pyo"}:
+            entries[source.relative_to(ROOT).as_posix()] = source.read_bytes()
+    for source in (ROOT / "resources" / "license_public_key.pem", ROOT / "start-license-generator.bat", ROOT / "requirements-admin.txt"):
+        if source.is_file():
+            entries[source.relative_to(ROOT).as_posix()] = source.read_bytes()
+    exe = ROOT / "热点图文工作台_本地许可证签发工具.exe"
+    if exe.is_file():
+        entries[exe.name] = exe.read_bytes()
+    entries["使用说明.txt"] = (
+        "本地许可证签发工具使用说明\n\n"
+        "1. 私钥只允许放在 %USERPROFILE%\\hotspot-license-admin\\license_private_key.pem，或通过 HOTSPOT_LICENSE_PRIVATE_KEY 指定。\n"
+        "2. 本 ZIP 不包含私钥，也不会自动生成新的签名身份。\n"
+        "3. 运行 start-license-generator.bat 或同目录 exe，填写客户名称、设备申请码、有效天数和版本类型后生成激活码。\n"
+        "4. 客户端粘贴激活码后应显示 LICENSE_VALID。\n"
+    ).encode("utf-8")
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for name in sorted(entries):
+            archive.writestr(name, entries[name])
+    with zipfile.ZipFile(output) as archive:
+        forbidden = [name for name in archive.namelist() if name.endswith((".pem", ".key", ".license")) and name != "resources/license_public_key.pem"]
+    if forbidden:
+        raise RuntimeError("LICENSE_ADMIN_PACKAGE_CONTAINS_PRIVATE_MATERIAL: " + ", ".join(forbidden))
+    return output
+
+
+def write_sha256s(paths: list[Path]) -> Path:
+    lines = []
+    for path in paths:
+        if path.is_file():
+            lines.append(f"{sha256(path)}  {path.name}")
+    output = ROOT / "SHA256SUMS"
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return output
+
 def make_evidence_package(output: Path) -> Path:
     prior_candidates = sorted(
         ROOT.glob("RC1.3.3-Lite-*_鐪熷疄鐑偣璇佹嵁鍖zip"),
@@ -462,7 +515,7 @@ def main() -> int:
     launcher, _setup_stub = base.build_native(native_dir)
 
     source_zip = ROOT / f"{PRODUCT}_Source.zip"
-    source_manifest = ROOT / "HF4.1_source_manifest.json"
+    source_manifest = ROOT / "HF4.1-R1.1_source_manifest.json"
     package_phase1.OUTPUT = source_zip
     package_phase1.MANIFEST = source_manifest
     package_phase1.main()
@@ -505,7 +558,10 @@ def main() -> int:
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    report = ROOT / "HF4.1\u6700\u7ec8\u6784\u5efa\u62a5\u544a.md"
+    license_admin_exe = build_license_admin_exe(ROOT / "热点图文工作台_本地许可证签发工具.exe")
+    license_admin_zip = build_license_admin_package(ROOT / "热点图文工作台_本地许可证签发工具.zip")
+
+    report = ROOT / "HF4.1-R1.1_最终构建报告.md"
     report.write_text(
         f"# {RELEASE} \u6700\u7ec8\u6784\u5efa\u62a5\u544a\n\n"
         f"\u6784\u5efa\u65f6\u95f4\uff1a{now}\n\n"
@@ -523,7 +579,7 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    self_review = ROOT / "HF4.1\u6700\u7ec8\u81ea\u68c0\u62a5\u544a.md"
+    self_review = ROOT / "HF4.1-R1.1_最终自检报告.md"
     self_review.write_text(
         f"# {RELEASE} \u6700\u7ec8\u81ea\u68c0\u62a5\u544a\n\n"
         f"\u5f53\u524d\u72b6\u6001\uff1a`{STATUS}`\n\n"
@@ -538,16 +594,19 @@ def main() -> int:
         "setup": {"filename": setup.name, "sha256": sha256(setup), "size": setup.stat().st_size},
         "customer_package": {"filename": customer_zip.name, "sha256": sha256(customer_zip)},
         "source": {"filename": source_zip.name, "sha256": sha256(source_zip)},
+        "license_admin_zip": {"filename": license_admin_zip.name, "sha256": sha256(license_admin_zip), "size": license_admin_zip.stat().st_size},
+        "license_admin_exe": {"filename": license_admin_exe.name, "sha256": sha256(license_admin_exe), "size": license_admin_exe.stat().st_size},
         "evidence_package": {"filename": evidence_zip.name, "sha256": sha256(evidence_zip)},
         "user_flow_gui_evidence_package": {"filename": gui_evidence.name, "sha256": sha256(gui_evidence)},
         "install_uninstall_check": install_check,
         "test_record": test_record,
         "status": STATUS,
     }
-    (ROOT / "HF4.1_upload_manifest.json").write_text(
+    (ROOT / "HF4.1-R1.1_upload_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    write_sha256s([setup, customer_zip, source_zip, license_admin_exe, license_admin_zip, ROOT / "HF4.1-R1.1_upload_manifest.json"])
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0
 

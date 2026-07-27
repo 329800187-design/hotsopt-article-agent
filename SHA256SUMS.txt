@@ -1,0 +1,6 @@
+4799f79c08437b5112d8ac0d47a944c17f489db3a86f95cfc2154ad4b43040f8  热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.1_Setup.exe
+d29de3499120be5854fe68e8997ead349a654dfaf45231e2e438388e4f2fa928  热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.1_客户交付包.zip
+87b01a4ed24969ce0b5a785bb33d6e94298f8f525224d4022d6e34eaed2dc61a  热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.1_Source.zip
+90c314fc69724c81aff85ef3a6c0fc34079c75b0e433debc42bd6f4914096910  热点图文工作台_本地许可证签发工具.exe
+7f65472a4aa0424cc313b225e7d31c1e22eaa83e811e1d226d82b531d1cb90cf  热点图文工作台_本地许可证签发工具.zip
+24746e10a01b3708fe44df9cbfeb681c8280c674825cac9fcd2a23a650e83101  HF4.1-R1.1_upload_manifest.json

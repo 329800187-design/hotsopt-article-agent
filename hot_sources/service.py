@@ -9,6 +9,7 @@ from hot_sources.manual import ManualHotSource
 from hot_sources.newsnow import NewsNowSource
 from hot_sources.registry import get_daily_source
 from hot_sources.toutiao_official import ToutiaoOfficialSource
+from hot_sources.tophub import TopHubToutiaoSource
 from modules.database import DB_PATH, SQLiteStore, get_store
 from modules.models import HotTopic, utc_now
 from modules.topic_cache import TopicCacheStore, get_default_cache_store
@@ -30,7 +31,12 @@ class HotTrendService:
         else:
             self.cache_store = TopicCacheStore(self.store.db_path.parent / "cache" / "latest_topics.json", environment="test")
         network_settings = settings.get("network", {})
-        self.providers = providers if providers is not None else [ToutiaoOfficialSource(network_settings=network_settings), get_daily_source(settings.get("hot_source_url", ""), network_settings=network_settings), NewsNowSource(network_settings=network_settings)]
+        self.providers = providers if providers is not None else [
+            ToutiaoOfficialSource(network_settings=network_settings),
+            get_daily_source(settings.get("hot_source_url", ""), network_settings=network_settings),
+            NewsNowSource(network_settings=network_settings),
+            TopHubToutiaoSource(network_settings=network_settings),
+        ]
         self.cache_provider = cache_provider if cache_provider is not None else LocalCacheProvider(self.cache_store)
 
     @staticmethod

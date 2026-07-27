@@ -30,7 +30,7 @@ from generation.selected_images import generate_selected_images
 from generation.editor import discard_article_draft, get_article, restore_article_version, save_article, save_article_draft
 from export.docx_exporter import export_article
 from export.zip_exporter import export_article_bundle, export_batch_bundle, safe_filename
-from export.layout_pipeline import ensure_article_layout
+from export.layout_pipeline import ensure_article_layout, prepare_article_layout
 from generation.recovery import recover_interrupted_tasks
 from generation.single_task import prepare_generation_state
 from modules.generation_store import generation_task_dir, load_generation_task, save_generation_task
@@ -1009,9 +1009,11 @@ def _article_export(task_id: str, kind: str) -> FileResponse:
     state = load_generation_task(task_id)
     if not state or not isinstance(state.get("article"), dict):
         raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
-    if state.get("status") != "completed" or state.get("rewrite_requested") or state.get("stage") not in {"completed", None, ""}:
+    exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
+    if state.get("status") not in exportable_statuses or state.get("rewrite_requested"):
         raise ProviderError("ARTICLE_NOT_FINAL", "article is not final")
-    if state["article"].get("layout_status") != "passed" or not (state["article"].get("layout_check") or {}).get("passed"):
+    article = prepare_article_layout(state["article"])
+    if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
         raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
         raise ProviderError("ARTICLE_NOT_FINAL", "内容仍在进行差异检查或自动优化，完成后即可导出。")
     root = generation_task_dir(task_id)
@@ -1020,10 +1022,10 @@ def _article_export(task_id: str, kind: str) -> FileResponse:
     title = safe_filename(str(state["article"].get("title") or "文章"))
     if kind == "word":
         path = export_root / f"{task_id}_{title}.docx"
-        export_article(state["article"], path, root)
+        export_article(article, path, root)
         return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=f"{title}.docx")
     path = export_root / f"{task_id}_{title}.zip"
-    export_article_bundle(state["article"], root, path)
+    export_article_bundle(article, root, path)
     return FileResponse(path, media_type="application/zip", filename=f"{title}.zip")
 
 

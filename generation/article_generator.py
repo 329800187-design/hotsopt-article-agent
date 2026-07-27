@@ -78,10 +78,14 @@ def _trim_text(value: str, max_chars: int) -> str:
 def _accepted_sources(research_bundle: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not research_bundle:
         return []
+    limited_mode = bool(research_bundle.get("hotlist_metadata_available") and str(research_bundle.get("research_status") or "") == "hotlist_limited")
     return [
         item
         for item in research_bundle.get("sources") or []
-        if isinstance(item, dict) and item.get("fetch_success") and item.get("accepted_for_research") and not item.get("duplicate_of")
+        if isinstance(item, dict)
+        and item.get("fetch_success")
+        and (item.get("accepted_for_research") or (limited_mode and item.get("limited_metadata")))
+        and not item.get("duplicate_of")
     ]
 
 
@@ -169,8 +173,10 @@ def _fact_card_block(research_bundle: dict[str, Any] | None) -> str:
     timeline = "\uff1b".join(str(item) for item in (research_bundle.get("timeline") or [])[:6]) or none_value
     people = "\uff1b".join(str(item) for item in (research_bundle.get("key_people") or [])[:5]) or none_value
     orgs = "\uff1b".join(str(item) for item in (research_bundle.get("key_organizations") or [])[:5]) or none_value
+    notice = str(research_bundle.get("limited_research_notice") or "").strip()
     return (
         f"\u516c\u5f00\u8d44\u6599\u6574\u7406\u72b6\u6001\uff1a{research_bundle.get('research_status')}\n"
+        f"{notice + chr(10) if notice else ''}"
         f"\u5173\u952e\u4e8b\u5b9e\u5361\uff08\u6700\u591a10\u6761\uff09\uff1a\n{fact_lines or none_value}\n"
         f"\u80cc\u666f\u4e8b\u5b9e\u5361\uff08\u6700\u591a5\u6761\uff09\uff1a\n{background_lines or none_value}\n"
         f"\u8d44\u6599\u6765\u6e90\u76ee\u5f55\uff08\u6700\u591a3\u6761\uff0c\u4ec5\u4f9b\u7f72\u540d\uff0c\u4e0d\u5f97\u590d\u8ff0\u539f\u6587\uff09\uff1a\n{source_lines or none_value}\n"

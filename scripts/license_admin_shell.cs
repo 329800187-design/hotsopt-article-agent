@@ -31,7 +31,7 @@ internal static class LicenseAdminShell
         }
         try
         {
-            Process.Start(new ProcessStartInfo
+            Process process = Process.Start(new ProcessStartInfo
             {
                 FileName = python,
                 Arguments = "-m license_admin.license_generator_gui",
@@ -39,6 +39,10 @@ internal static class LicenseAdminShell
                 UseShellExecute = false,
                 CreateNoWindow = true
             });
+            if (process != null)
+            {
+                process.WaitForExit();
+            }
         }
         catch (Exception)
         {
