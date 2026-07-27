@@ -8,6 +8,7 @@ from generation.image_budget import count_body_chinese_chars, recommended_word_c
 from modules.models import HotTopic
 from modules.source_formatter import normalize_source_list
 from providers.text_provider import OpenAITextProvider, ProviderError, parse_json_response
+from providers.contracts import ArticleGenerationRequest
 
 
 MIN_SECTIONS = 3
@@ -205,45 +206,73 @@ def _prompt(
     rewrite_context: dict[str, Any] | None = None,
     research_bundle: dict[str, Any] | None = None,
 ) -> str:
-    structure = "\u3001".join(str(item) for item in angle.get("structure", []))
-    must_avoid = "\u3001".join(str(item) for item in angle.get("must_avoid", []))
+    bundle = research_bundle or {}
+    custom_topic_mode = bool(bundle.get("custom_topic") and str(bundle.get("research_status") or "") == "custom_topic")
+    structure = "、".join(str(item) for item in angle.get("structure", []))
+    must_avoid = "、".join(str(item) for item in angle.get("must_avoid", []))
     requested_chars = max(700, min(int(word_count or 800), 1600))
     target_length_text = "700 到 1000 个中文汉字" if requested_chars <= 1000 else f"约 {requested_chars} 个中文汉字"
-    prompt = f"""\u8bf7\u4e3a\u4e0b\u9762\u7684\u70ed\u70b9\u751f\u6210\u4e00\u7bc7\u53ef\u76f4\u63a5\u7f16\u8f91\u7684\u4e2d\u6587\u6587\u7ae0\uff0c\u4e25\u683c\u53ea\u4f7f\u7528\u5df2\u63d0\u4f9b\u4e8b\u5b9e\u5361\uff0c\u4e0d\u5f97\u865a\u6784\u4eba\u7269\u3001\u65f6\u95f4\u3001\u6570\u5b57\u3001\u91d1\u989d\u6216\u4e8b\u4ef6\u8fdb\u5c55\u3002
-\u4f60\u4e0d\u662f\u6458\u8981\u5de5\u5177\uff0c\u4e5f\u4e0d\u662f\u6539\u5199\u539f\u6587\u5de5\u5177\u3002\u4f60\u5fc5\u987b\u6839\u636e\u4e8b\u5b9e\u5361\u91cd\u65b0\u6784\u601d\u4e00\u7bc7\u65b0\u7684\u6587\u7ae0\uff0c\u800c\u4e0d\u662f\u62fc\u63a5\u3001\u590d\u8ff0\u6216\u538b\u7f29\u6765\u6e90\u539f\u6587\u3002
 
-\u70ed\u70b9\u6807\u9898\uff1a{topic.title}
-\u70ed\u70b9\u5206\u7c7b\uff1a{topic.category}
-\u70ed\u70b9\u6458\u8981\uff1a{topic.summary or ''}
-\u6765\u6e90\u94fe\u63a5\uff1a{topic.url or ''}
+    if custom_topic_mode:
+        title_text = str(topic.title or "自定义话题").strip()
+        summary = str(topic.summary or "").strip()
+        prompt = f"""请为下面的手动话题生成一篇可直接编辑的中文文章。直接输出标准 Markdown 正文，不要输出 JSON，不要输出代码围栏。
+
+话题：{title_text}
+用户补充说明：{summary or '无'}
+文章类型：{article_type}
+表达风格：{style}
+目标字数：{target_length_text}
+
+文章结构（固定）：
+# 新标题
+导语
+## 核心概念或事件概览
+正文
+## 可执行方法或背景原因
+正文
+## 具体步骤或影响分析
+正文
+## 风险提醒或后续关注
+正文
+## 总结
+正文
+
+要求：
+1. 必须包含具体案例、实际场景和方法细节，不得只写空洞模板。
+2. 正文 700～1000 个中文汉字。
+3. 直接输出标准 Markdown，不要 JSON、不要代码围栏、不要解释文字。
+4. 不虚构数据或人名，不承诺无法验证的收益。"""
+        normalized_prompt = prompt.strip()
+        return normalized_prompt[:3500]
+
+    prompt = f"""请为下面的热点生成一篇可直接编辑的中文文章，严格只使用已提供事实卡，不得虚构人物、时间、数字、金额或事件进展。
+你不是摘要工具，也不是改写原文工具。你必须根据事实卡重新构思一篇新的文章，而不是拼接、复述或压缩来源原文。
+
+热点标题：{topic.title}
+热点分类：{topic.category}
+热点摘要：{topic.summary or ''}
+来源链接：{topic.url or ''}
 {_fact_card_block(research_bundle)}
 
-\u521b\u4f5c\u89d2\u5ea6\uff1a{angle['name']}\uff08{angle['instruction']}\uff09
-\u89d2\u5ea6\u6838\u5fc3\u95ee\u9898\uff1a{angle.get('core_question', '')}
-\u5f00\u7bc7\u7b56\u7565\uff1a{angle.get('opening_strategy', '')}
-\u5efa\u8bae\u7ed3\u6784\uff1a{structure}
-\u5fc5\u987b\u907f\u514d\uff1a{must_avoid}
-\u6587\u7ae0\u7c7b\u578b\uff1a{article_type}
-\u8868\u8fbe\u98ce\u683c\uff1a{style}
-\u76ee\u6807\u5b57\u6570\uff1a{target_length_text}
+创作角度：{angle['name']}（{angle['instruction']}）
+角度核心问题：{angle.get('core_question', '')}
+开篇策略：{angle.get('opening_strategy', '')}
+建议结构：{structure}
+必须避免：{must_avoid}
+文章类型：{article_type}
+表达风格：{style}
+目标字数：{target_length_text}
 
-\u786c\u6027\u8981\u6c42\uff1a
-1. \u5fc5\u987b\u91cd\u5199\u6807\u9898\u3001\u5bfc\u8bed\u3001\u6bb5\u843d\u987a\u5e8f\u548c\u6838\u5fc3\u8868\u8fbe\uff0c\u5f62\u6210\u72ec\u7acb\u65b0\u7ed3\u6784\u3002
-2. \u5fc5\u987b\u5305\u542b\uff1a\u5bfc\u8bed\u3001\u4e8b\u4ef6\u6982\u89c8\u3001\u80cc\u666f\u6216\u539f\u56e0\u3001\u5f71\u54cd\u6216\u610f\u4e49\u3001\u540e\u7eed\u5173\u6ce8\u3001\u8d44\u6599\u6765\u6e90\u3002
-3. \u53ea\u5141\u8bb8\u4f9d\u636e\u4e8b\u5b9e\u5361\u6269\u5c55\u80cc\u666f\u89e3\u91ca\u3001\u884c\u4e1a\u5f71\u54cd\u3001\u666e\u901a\u8bfb\u8005\u4ef7\u503c\u3001\u540e\u7eed\u89c2\u5bdf\u65b9\u5411\uff0c\u4e0d\u5f97\u7167\u6284\u6765\u6e90\u6bb5\u843d\u3002
-4. \u9664\u4eba\u540d\u3001\u673a\u6784\u540d\u3001\u653f\u7b56\u540d\u3001\u65e5\u671f\u3001\u6570\u5b57\u548c\u5fc5\u8981\u76f4\u63a5\u5f15\u8bed\u5916\uff0c\u4e0d\u5f97\u8fde\u7eed\u590d\u5236\u6765\u6e90\u539f\u6587\u8d85\u8fc7 30 \u4e2a\u4e2d\u6587\u6c49\u5b57\u3002
-5. \u4e0d\u5f97\u628a\u201c\u6765\u6e901\u5185\u5bb9 + \u6765\u6e902\u5185\u5bb9 + \u6765\u6e903\u5185\u5bb9\u201d\u987a\u5e8f\u62fc\u63a5\u6210\u6587\u3002
-6. \u6b63\u6587\u4f7f\u7528 Markdown \u5448\u73b0\uff1a1 \u4e2a\u4e3b\u6807\u9898\u30011 \u6bb5\u5bfc\u8bed\u30013 \u5230 5 \u4e2a\u4e8c\u7ea7\u6807\u9898\uff1b\u6bcf\u6bb5\u5efa\u8bae 80 \u5230 180 \u4e2a\u6c49\u5b57\uff0c\u5e76\u4fdd\u7559\u7a7a\u884c\u3002
-7. \u7981\u6b62\u8f93\u51fa\u7f51\u9875\u5168\u6587\u3001\u957f\u6458\u8981\u3001JSON \u89e3\u91ca\u6587\u5b57\u3001\u4ee3\u7801\u56f4\u680f\u6216\u8c03\u8bd5\u5b57\u6bb5\u3002
-8. \u8fd4\u56de\u4e00\u4e2a\u7b80\u5316 JSON \u5bf9\u8c61\uff0c\u81f3\u5c11\u5305\u542b title\u3001intro\u3001sections\u3001content_markdown\u3002fact_basis\u3001summary\u3001tags\u3001ai_statement \u53ef\u9009\u3002
-9. \u5982\u679c\u65e0\u6cd5\u7a33\u5b9a\u8fd4\u56de JSON\uff0c\u4e5f\u53ef\u4ee5\u76f4\u63a5\u8fd4\u56de\u6807\u51c6 Markdown \u6b63\u6587\uff0c\u4f46\u4e0d\u8981\u8f93\u51fa\u4ee3\u7801\u56f4\u680f\u3002
-10. content_markdown \u672b\u5c3e\u5fc5\u987b\u9644\u4e0a\u201c\u8d44\u6599\u6765\u6e90\u201d\u5217\u8868\uff0c\u7edf\u4e00\u683c\u5f0f\u4e3a\uff1a
-   [1] \u53d1\u5e03\u673a\u6784\uff1a\u300a\u6807\u9898\u300b\uff0c\u53d1\u5e03\u65e5\u671f
-   \u539f\u6587\u94fe\u63a5\uff1aURL
-"""
+要求：
+1. 必须重写标题、导语、段落顺序和核心表达，形成独立新结构。
+2. 必须包含：导语、事件概览、背景或原因、影响或意义、后续关注。
+3. 正文使用 Markdown：1 个主标题、1 段导语、3 到 5 个二级标题；每段建议 80 到 180 个汉字，并保留空行。
+4. 直接输出标准 Markdown 正文，不要输出 JSON、不要代码围栏、不要调试字段。
+5. 如果无法返回标准 Markdown，也可以直接返回纯文本正文。"""
     if rewrite_context:
         conflict = rewrite_context.get("conflict_article") or {}
-        rewrite_reason = str(rewrite_context.get("reason") or "\u9700\u8981\u6309 HF4.1 \u89c4\u5219\u91cd\u5199")
+        rewrite_reason = str(rewrite_context.get("reason") or "需要按 HF4.1 规则重写")
         old_title = str(conflict.get("title") or "未提供旧标题")
         old_opening = str(conflict.get("opening") or "未提供旧导语")
         old_headings = "；".join(str(item) for item in conflict.get("headings") or []) or "未提供旧结构"
@@ -258,7 +287,7 @@ def _prompt(
 - 第二次调用只能执行这一次重写，完成后不得再次调用模型。
 """
     normalized_prompt = prompt.strip()
-    return normalized_prompt if len(normalized_prompt) <= 6000 else normalized_prompt[:6000]
+    return normalized_prompt[:3500]
 
 
 
@@ -675,11 +704,14 @@ def generate_article(
     )
     call_reason = "full_article" if int(stats.get("text_generation_calls") or 0) == 0 else str((rewrite_context or {}).get("reason_code") or "rewrite")
     _register_text_generation_call(stats, call_reason)
-    token_budget = 1600 if requested_word_count > 1000 else 1200
-    response = provider.generate(
-        generation_prompt,
-        temperature=0.6,
-        max_tokens=token_budget,
+    token_budget = 1600 if requested_word_count <= 1000 else 2000
+    response = provider.generate_article(
+        ArticleGenerationRequest(
+            generation_prompt,
+            temperature=0.6,
+            max_tokens=token_budget,
+            response_format="none",
+        )
     )
     stripped = _strip_code_fence(response)
     parsed: dict[str, Any] | None = None

@@ -863,7 +863,8 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
         "status": "running",
     })
     try:
-        text_timeout_limit = min(70, max(25, int(text_profile.get("timeout_seconds") or (settings.get("network") or {}).get("timeout_seconds") or 70)))
+        configured_timeout = int(text_profile.get("timeout_seconds") or (settings.get("network") or {}).get("timeout_seconds") or 150)
+        text_timeout_limit = max(90, min(180, configured_timeout))
         effective_text_profile = dict(text_profile)
         effective_text_profile["timeout_seconds"] = text_timeout_limit
         if bool(effective_text_profile.get("has_api_key")) and not str(effective_text_profile.get("api_key") or "").strip():
@@ -912,22 +913,30 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
             _persist(state, store)
             used_fallback = False
             state["fallback_notice"] = ""
-            generation_stats = {"text_generation_calls": 0, "text_generation_limit": 2 if rewrite_context else 1, "text_generation_second_call_reason": ""}
+            generation_stats = {"text_generation_calls": 0, "text_generation_limit": 1, "text_generation_second_call_reason": ""}
             try:
                 state["text_model_started_at"] = utc_now()
                 state["text_model_finished_at"] = None
                 state["provider_error_code"] = ""
                 state["provider_error_message"] = ""
+                state["request_endpoint"] = str(effective_text_profile.get("base_url") or "")[:200]
+                state["response_format"] = "none"
+                state["text_timeout_seconds"] = int(text_timeout_limit)
+                state["text_max_tokens"] = 1400
                 _persist(state, store)
                 article = generate_article(topic, angle, article_type, style, word_count, effective_text_profile, demo_mode=False, app_mode="production", network_settings=settings.get("network"), rewrite_context=rewrite_context, research_bundle=bundle, generation_stats=generation_stats)
                 state["text_model_finished_at"] = utc_now()
                 state["text_generation_result"] = "success"
+                state["text_model_elapsed_seconds"] = round((state["text_model_finished_at"].timestamp() - state["text_model_started_at"].timestamp()), 1) if state.get("text_model_started_at") and state.get("text_model_finished_at") else 0
+                state["text_http_status"] = 200
                 if str(article.get("recommended_status") or "") == "too_short":
                     raise ProviderError("ARTICLE_TOO_SHORT", "\u6a21\u578b\u8fd4\u56de\u6b63\u6587\u8fc7\u77ed")
             except ProviderError as exc:
                 state["text_model_finished_at"] = utc_now()
+                state["text_model_elapsed_seconds"] = round((state["text_model_finished_at"].timestamp() - state["text_model_started_at"].timestamp()), 1) if state.get("text_model_started_at") and state.get("text_model_finished_at") else 0
                 state["provider_error_code"] = str(exc.code)
                 state["provider_error_message"] = redact_sensitive_text(str(getattr(exc, "detail", exc)))[:500]
+                state["text_http_status"] = int((getattr(exc, "details", {}) or {}).get("http_status") or 0)
                 if exc.code not in {"TIMEOUT", "ARTICLE_TOO_SHORT", "MODEL_OUTPUT_INVALID", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED"}:
                     raise
                 used_fallback = True
