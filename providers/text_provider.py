@@ -269,12 +269,200 @@ def _classify_http_502(response: httpx.Response, details: dict[str, Any]) -> Pro
     )
 
 
+def _parse_sse_stream(body: str) -> str:
+    """Parse SSE (Server-Sent Events) streaming response body into concatenated text."""
+    parts: list[str] = []
+    for line in str(body or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith(":"):
+            continue
+        if line.lower() == "data: [done]":
+            continue
+        if line.startswith("data:"):
+            data_str = line[5:].strip()
+            if not data_str or data_str == "[DONE]":
+                continue
+            try:
+                chunk = json.loads(data_str)
+            except json.JSONDecodeError:
+                parts.append(data_str)
+                continue
+            if isinstance(chunk, dict):
+                choices = chunk.get("choices")
+                if isinstance(choices, list) and choices:
+                    first = choices[0] if isinstance(choices[0], dict) else {}
+                    for candidate in (first.get("delta"), first.get("message"), first):
+                        text = "".join(_extract_text_blocks(candidate)).strip()
+                        if text:
+                            parts.append(text)
+                            break
+    return "".join(parts).strip()
+
+
+def _decode_provider_response(response: httpx.Response) -> tuple[str, dict[str, Any]]:
+    """Intelligently decode provider response into (content, diagnostic).
+
+    Handles: standard JSON wrapper, SSE streaming, plain text / Markdown.
+    """
+    raw_body = str(response.text or "")
+    content_type = str(response.headers.get("Content-Type") or "").strip()
+    diagnostic: dict[str, Any] = {
+        "http_status": response.status_code,
+        "content_type": content_type,
+        "parser_mode": "",
+        "response_preview": _preview_text(raw_body),
+    }
+
+    # ── Try 1: Standard JSON (OpenAI chat completions wrapper) ──
+    try:
+        data = response.json()
+    except (json.JSONDecodeError, ValueError):
+        data = None
+
+    if isinstance(data, dict):
+        content = _extract_response_content(data)
+        if content:
+            diagnostic["parser_mode"] = "json"
+            return content, diagnostic
+        # Check for reasoning_content without content
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0] if isinstance(choices[0], dict) else {}
+            msg = first.get("message")
+            if isinstance(msg, dict):
+                if msg.get("reasoning_content") and not msg.get("content"):
+                    diagnostic["parser_mode"] = "json"
+                    diagnostic["content_present"] = False
+                    diagnostic["reasoning_content_present"] = True
+                    return ("MODEL_OUTPUT_EMPTY", diagnostic)
+        # Empty JSON but valid
+        diagnostic["parser_mode"] = "json"
+        return ("", diagnostic)
+
+    # ── Try 2: SSE streaming ──
+    if raw_body.strip().startswith("data:"):
+        sse_content = _parse_sse_stream(raw_body)
+        if sse_content:
+            diagnostic["parser_mode"] = "sse"
+            return sse_content, diagnostic
+
+    # ── Try 3: Plain text / Markdown ──
+    text = raw_body.strip()
+    if text:
+        diagnostic["parser_mode"] = "text"
+        return text, diagnostic
+
+    # ── Empty ──
+    diagnostic["parser_mode"] = "empty"
+    return ("", diagnostic)
+
+
 class OpenAITextProvider:
     def __init__(self, profile: dict[str, Any], network_settings: dict[str, Any] | None = None) -> None:
         self.profile = profile
         self.network_settings = resolve_network_settings(network_settings, profile)
         self.last_http_status: int | None = None
         self.last_diagnostic: dict[str, Any] = {}
+
+    def _request_text(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        response_format: str = "none",
+    ) -> tuple[str, dict[str, Any]]:
+        """Unified text request — all call paths MUST use this single HTTP + decode pipeline."""
+        url, url_details = _build_request_url(
+            str(self.profile.get("base_url") or ""),
+            str(self.profile.get("endpoint") or DEFAULT_TEXT_ENDPOINT),
+        )
+        diagnostic: dict[str, Any] = {
+            **url_details,
+            "model": str(self.profile.get("model") or ""),
+            "requested_response_format": response_format,
+            "payload_has_response_format": bool(response_format and response_format != "none"),
+            "stream": False,
+            "max_tokens": max_tokens,
+            "http_status": None,
+            "content_type": "",
+            "parser_mode": "",
+            "response_preview": "",
+            "elapsed_ms": 0,
+            "error_type": "",
+        }
+        payload: dict[str, Any] = {
+            "model": self.profile.get("model"),
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if response_format and response_format != "none":
+            payload["response_format"] = {"type": "json_object"}
+            diagnostic["payload_has_response_format"] = True
+        response: httpx.Response | None = None
+        started = time.perf_counter()
+        try:
+            timeout = float(self.profile.get("timeout_seconds") or self.network_settings.get("timeout_seconds") or 120)
+            with create_http_client({**self.network_settings, "timeout_seconds": timeout}) as client:
+                response = client.post(url, headers=_headers(self.profile), json=payload)
+            self.last_http_status = response.status_code
+            diagnostic.update(
+                {
+                    "http_status": response.status_code,
+                    "content_type": _content_type(response),
+                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
+                }
+            )
+            if response.status_code == 401:
+                raise ProviderError("AUTHENTICATION_FAILED", "text model authentication failed", details=dict(diagnostic))
+            if response.status_code == 404:
+                raise ProviderError("MODEL_NOT_FOUND", "text model endpoint or model was not found", details=dict(diagnostic))
+            if response.status_code == 429:
+                from providers.errors import parse_retry_after
+                raise ProviderError(
+                    "RATE_LIMITED",
+                    "text model rate limited",
+                    parse_retry_after(response.headers.get("Retry-After")),
+                    details=dict(diagnostic),
+                )
+            if response.status_code == 502:
+                raise _classify_http_502(response, dict(diagnostic))
+            response.raise_for_status()
+            # ── unified decode ──
+            content, decode_diag = _decode_provider_response(response)
+            diagnostic.update(decode_diag)
+            if not content:
+                raise ProviderError("INVALID_RESPONSE", "text model response content is empty", details=dict(diagnostic))
+            if content == "MODEL_OUTPUT_EMPTY":
+                diagnostic["error_type"] = "model_output_empty"
+                raise ProviderError("MODEL_OUTPUT_EMPTY", "text model returned reasoning_content but no content", details=dict(diagnostic))
+            diagnostic["error_type"] = "success"
+            return content, diagnostic
+        except httpx.TimeoutException as exc:
+            diagnostic.update({"elapsed_ms": int((time.perf_counter() - started) * 1000), "error_type": "timeout"})
+            error = ProviderError("TIMEOUT", "text model response timed out", details=dict(diagnostic))
+            logger.error(_diagnostic_message(error.details))
+            raise error from exc
+        except httpx.HTTPError as exc:
+            mapped = map_provider_exception(exc, response)
+            details = dict(getattr(mapped, "details", {}) or diagnostic)
+            if details:
+                logger.error(_diagnostic_message(details))
+            raise mapped from exc
+        except ProviderError as exc:
+            details = dict(exc.details or diagnostic)
+            if details:
+                if "http_status" not in details:
+                    details["http_status"] = self.last_http_status
+                logger.error(_diagnostic_message(details))
+            raise
+        except Exception as exc:
+            mapped = map_provider_exception(exc, response)
+            details = dict(getattr(mapped, "details", {}) or diagnostic)
+            if details:
+                logger.error(_diagnostic_message(details))
+            raise mapped from exc
 
     def _error_result(self, started: float, mapped: Exception, error_code: str | None = None, retryable: bool | None = None) -> ModelTestResult:
         code = error_code or str(getattr(mapped, "code", "PROVIDER_INTERNAL_ERROR"))
@@ -392,95 +580,26 @@ class OpenAITextProvider:
             return result
 
     def generate(self, prompt: str, temperature: float = 0.8, max_tokens: int = 3000) -> str:
-        return self.generate_article(ArticleGenerationRequest(prompt, temperature, max_tokens, str(self.profile.get("response_format") or "json_object")))
+        """Formal article generation — always uses response_format='none' for Markdown output."""
+        return self.generate_article(ArticleGenerationRequest(prompt, temperature, max_tokens, "none"))
 
     def generate_article(self, request: ArticleGenerationRequest) -> str:
         api_key = str(self.profile.get("api_key") or "")
         if not api_key and str(self.profile.get("auth_type") or "bearer").lower() != "none":
             raise ProviderError("MODEL_NOT_CONFIGURED", "text model API key is missing")
-        url, details = _build_request_url(str(self.profile.get("base_url") or ""), str(self.profile.get("endpoint") or DEFAULT_TEXT_ENDPOINT))
-        self.last_diagnostic = {
-            **details,
-            "model": str(self.profile.get("model") or ""),
-            "http_status": None,
-            "content_type": "",
-            "response_preview": "",
-            "elapsed_ms": 0,
-            "error_type": "",
-        }
-        payload: dict[str, Any] = {
-            "model": self.profile.get("model"),
-            "messages": [
-                {"role": "system", "content": "You are a careful Chinese news writer. Separate facts from analysis."},
-                {"role": "user", "content": request.prompt},
-            ],
-            "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
-        }
-        response_format = request.response_format or str(self.profile.get("response_format") or "")
-        if response_format and response_format != "none":
-            payload["response_format"] = {"type": "json_object"}
-        response: httpx.Response | None = None
-        started = time.perf_counter()
-        try:
-            timeout = float(self.profile.get("timeout_seconds") or self.network_settings.get("timeout_seconds") or 120)
-            with create_http_client({**self.network_settings, "timeout_seconds": timeout}) as client:
-                response = client.post(url, headers=_headers(self.profile), json=payload)
-            self.last_http_status = response.status_code
-            self.last_diagnostic.update(
-                {
-                    "http_status": response.status_code,
-                    "content_type": _content_type(response),
-                    "response_preview": _response_preview(response),
-                    "elapsed_ms": int((time.perf_counter() - started) * 1000),
-                }
-            )
-            if response.status_code == 401:
-                raise ProviderError("AUTHENTICATION_FAILED", "text model authentication failed", details=dict(self.last_diagnostic))
-            if response.status_code == 404:
-                raise ProviderError("MODEL_NOT_FOUND", "text model endpoint or model was not found", details=dict(self.last_diagnostic))
-            if response.status_code == 429:
-                from providers.errors import parse_retry_after
-
-                raise ProviderError(
-                    "RATE_LIMITED",
-                    "text model rate limited",
-                    parse_retry_after(response.headers.get("Retry-After")),
-                    details=dict(self.last_diagnostic),
-                )
-            if response.status_code == 502:
-                raise _classify_http_502(response, dict(self.last_diagnostic))
-            response.raise_for_status()
-            data = response.json()
-            content = _extract_response_content(data if isinstance(data, dict) else {})
-            if not content:
-                raise ProviderError("INVALID_RESPONSE", "text model response content is empty", details=dict(self.last_diagnostic))
-            self.last_diagnostic["error_type"] = "success"
-            return str(content)
-        except httpx.TimeoutException as exc:
-            self.last_diagnostic.update({"elapsed_ms": int((time.perf_counter() - started) * 1000), "error_type": "timeout"})
-            error = ProviderError("TIMEOUT", "text model response timed out", details=dict(self.last_diagnostic))
-            logger.error(_diagnostic_message(error.details))
-            raise error from exc
-        except httpx.HTTPError as exc:
-            mapped = map_provider_exception(exc, response)
-            details = dict(getattr(mapped, "details", {}) or self.last_diagnostic)
-            if details:
-                logger.error(_diagnostic_message(details))
-            raise mapped from exc
-        except ProviderError as exc:
-            details = dict(exc.details or self.last_diagnostic)
-            if details:
-                if "http_status" not in details:
-                    details["http_status"] = self.last_http_status
-                logger.error(_diagnostic_message(details))
-            raise
-        except Exception as exc:
-            mapped = map_provider_exception(exc, response)
-            details = dict(getattr(mapped, "details", {}) or self.last_diagnostic)
-            if details:
-                logger.error(_diagnostic_message(details))
-            raise mapped from exc
+        response_format = request.response_format or "none"
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": "You are a careful Chinese news writer. Separate facts from analysis."},
+            {"role": "user", "content": request.prompt},
+        ]
+        content, diagnostic = self._request_text(
+            messages=messages,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            response_format=response_format,
+        )
+        self.last_diagnostic = diagnostic
+        return content
 
 
 def parse_json_response(text: str) -> dict[str, Any]:

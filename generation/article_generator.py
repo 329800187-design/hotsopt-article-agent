@@ -576,7 +576,7 @@ def _parse_markdown_article_response(
 ) -> dict[str, Any]:
     text = _strip_code_fence(response)
     if not text:
-        raise ProviderError("MODEL_OUTPUT_INVALID", "\u6a21\u578b\u672a\u8fd4\u56de\u53ef\u8bfb\u6b63\u6587")
+        raise ProviderError("ARTICLE_PARSE_ERROR", "模型未返回可读正文")
     paragraphs = _split_article_paragraphs(text)
     title = str(topic.title).strip()
     intro = ""
@@ -621,7 +621,7 @@ def _parse_markdown_article_response(
     article = _complete_article_structure(article, topic, angle)
     article["fallback_complete"] = _fallback_response_complete(text, article["title"], paragraphs, has_markdown_subheadings)
     if not article["fallback_complete"]:
-        raise ProviderError("MODEL_OUTPUT_INVALID", "模型返回内容不足，无法整理为可编辑文章")
+        raise ProviderError("ARTICLE_PARSE_ERROR", "模型返回内容不足，无法整理为可编辑文章")
     return article
 
 
@@ -631,10 +631,10 @@ def _clean_article(
     angle: dict[str, str],
 ) -> dict[str, Any]:
     if not isinstance(data, dict):
-        raise ProviderError("MODEL_OUTPUT_INVALID", "模型返回内容不是有效对象")
+        raise ProviderError("ARTICLE_PARSE_ERROR", "模型返回内容不是有效对象")
     raw_sections = data.get("sections")
     if not isinstance(raw_sections, list):
-        raise ProviderError("MODEL_OUTPUT_INVALID", "sections 字段不是有效列表")
+        raise ProviderError("ARTICLE_PARSE_ERROR", "sections 字段不是有效列表")
     cleaned_sections: list[dict[str, str]] = []
     for index, section in enumerate(raw_sections):
         if not isinstance(section, dict):
