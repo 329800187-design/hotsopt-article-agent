@@ -673,6 +673,11 @@ class ResearchService:
         official_fact_count = sum(1 for fact in facts if fact.get("verification_type") == "official_single_source")
         reliable_source_count = len([source for source in accepted_sources if is_official_source(source) or str(source.get("source_level") or "") in {"official", "source_page"}])
         usable_fact_count = len(usable_facts)
+        research_fact_cards = _fact_cards(usable_facts, accepted_sources)
+        background_fact_cards = _fact_cards(
+            [f for f in usable_facts if _is_background_fact(f.get("canonical_fact", "") or f.get("fact", ""))],
+            accepted_sources,
+        )
         has_event_context = bool(key_people or key_orgs or timeline or getattr(topic, "title", ""))
         has_conflict = bool(disputed_facts)
         condition_a = len(accepted_sources) >= 2
