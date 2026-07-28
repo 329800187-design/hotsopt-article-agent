@@ -32,6 +32,9 @@ from providers.text_provider import (
 from providers.contracts import ArticleGenerationRequest
 from generation.article_generator import generate_article as ag_generate_article
 from modules.models import HotTopic
+import generation.single_task as single_task
+import modules.generation_store as generation_store
+from modules.database import SQLiteStore
 
 
 # ── helpers ────────────────────────────────────────────────
@@ -448,3 +451,286 @@ class TestSSEParser:
         body = ': comment line\ndata: {"choices":[{"delta":{"content":"test"}}]}\n'
         result = _parse_sse_stream(body)
         assert result == "test"
+
+
+# ── test 8: article_generator calls OpenAITextProvider.generate() ──
+
+class TestArticleGeneratorCallsProviderGenerate:
+    """Prove ag_generate_article() calls provider.generate() → _request_text(response_format='none')."""
+
+    def test_ag_generate_article_calls_provider_generate_not_generate_article_directly(self):
+        """Verify article_generator calls OpenAITextProvider.generate(), not bypassing it."""
+        # Use a longer response that can be parsed as article
+        long_response = (
+            "# 携程被罚深度分析\n\n"
+            "近日携程因违规操作被监管部门处罚的消息引发广泛关注。\n\n"
+            "## 事件发生了什么\n\n"
+            "携程因违反相关数据安全规定，被网信办处以罚款并责令整改。"
+            "根据公开通报，涉及数据收集范围超出必要限度。"
+            "公司方面表示将全面配合整改，加强数据安全体系建设。\n\n"
+            "## 为什么受到关注\n\n"
+            "携程作为国内领先的在线旅游平台，其数据合规问题直接关系到数亿用户的信息安全。"
+            "此次处罚释放出监管部门对平台数据治理持续加强的信号。\n\n"
+            "## 可能带来哪些影响\n\n"
+            "短期内携程需投入资源合规整改，可能影响部分业务运营。"
+            "长期看数据安全合规将成为行业标配，有利于建立更健康的市场秩序。\n\n"
+            "## 后续值得关注什么\n\n"
+            "整改落实进度、用户数据保护改进方案、行业其他平台是否跟进加强建设。"
+            "本文将持续关注后续进展，为读者提供最新信息。"
+        )
+        body = json.dumps({"choices": [{"message": {"content": long_response}}]})
+        resp = _mock_response(body)
+        _orig_generate = OpenAITextProvider.generate
+        _orig_generate_article = OpenAITextProvider.generate_article
+        generate_called = []
+        ga_called = []
+        def _wrap_generate(self, prompt, temperature=0.8, max_tokens=3000):
+            generate_called.append(True)
+            return _orig_generate(self, prompt, temperature, max_tokens)
+        def _wrap_generate_article(self, request):
+            ga_called.append(True)
+            return _orig_generate_article(self, request)
+        OpenAITextProvider.generate = _wrap_generate
+        OpenAITextProvider.generate_article = _wrap_generate_article
+        try:
+            with patch("providers.text_provider.create_http_client") as mock_client:
+                mock_ctx = MagicMock()
+                mock_client.return_value.__enter__.return_value = mock_ctx
+                mock_ctx.post.return_value = resp
+                topic = HotTopic(
+                    id="t1", title="测试", category="科技", summary="测试",
+                    source_url="https://example.com", rank=1, captured_at="2026-01-01",
+                )
+                angle = {"name": "分析", "instruction": "test", "structure": [], "must_avoid": []}
+                article = ag_generate_article(
+                    topic=topic, angle=angle, article_type="analysis",
+                    style="documentary", word_count=800, profile=_make_profile(),
+                )
+                # generate() must have been called by ag_generate_article
+                assert generate_called, "ag_generate_article must call provider.generate()"
+                # generate() internally calls generate_article()
+                assert ga_called, "provider.generate() must call generate_article() internally"
+                assert article is not None
+        finally:
+            OpenAITextProvider.generate = _orig_generate
+            OpenAITextProvider.generate_article = _orig_generate_article
+
+    def test_generate_passes_response_format_none_to_request_text(self):
+        """generate() → generate_article() → _request_text(response_format='none')."""
+        provider = OpenAITextProvider(_make_profile())
+        resp = _mock_response(STANDARD_JSON_BODY)
+        with patch.object(provider, "_request_text", wraps=provider._request_text) as rt_spy:
+            with patch("providers.text_provider.create_http_client") as mock_client:
+                mock_ctx = MagicMock()
+                mock_client.return_value.__enter__.return_value = mock_ctx
+                mock_ctx.post.return_value = resp
+                result = provider.generate("test prompt")
+                assert rt_spy.called
+                assert rt_spy.call_args[1]["response_format"] == "none"
+                assert "携程被罚" in result
+
+
+# ── test 9: text/plain + SSE articles are parsed without INVALID_RESPONSE ──
+
+class TestPlainTextSSEArticleGeneration:
+    """Prove that text/plain Markdown and SSE responses don't raise INVALID_RESPONSE
+    and are successfully parsed by article_generator."""
+
+    def test_text_plain_does_not_raise_invalid_response_and_is_parsed(self):
+        """Provider returns text/plain Markdown → no INVALID_RESPONSE → article_generator parses successfully."""
+        provider = OpenAITextProvider(_make_profile())
+        # Provider returns plain text (not JSON-wrapped)
+        markdown_text = (
+            "# 携程被罚深度分析\n\n"
+            "近日携程因违规操作被监管部门处罚的消息引发广泛关注。\n\n"
+            "## 事件发生了什么\n\n"
+            "携程因违反相关数据安全规定，被网信办处以罚款并责令整改。"
+            "根据公开通报，涉及数据收集范围超出必要限度。"
+            "公司方面表示将全面配合整改，加强数据安全体系建设。\n\n"
+            "## 为什么受到关注\n\n"
+            "携程作为国内领先的在线旅游平台，其数据合规问题直接关系到数亿用户的信息安全。"
+            "此次处罚释放出监管部门对平台数据治理持续加强的信号。\n\n"
+            "## 可能带来哪些影响\n\n"
+            "短期内携程需投入资源合规整改，可能影响部分业务运营。"
+            "长期看数据安全合规将成为行业标配，有利于建立更健康的市场秩序。\n\n"
+            "## 后续值得关注什么\n\n"
+            "整改落实进度、用户数据保护改进方案、行业其他平台是否跟进加强建设。"
+            "本文将持续关注后续进展，为读者提供最新信息。"
+        )
+        resp = _mock_response(markdown_text, content_type="text/plain")
+        resp.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
+        topic = HotTopic(
+            id="t1", title="携程被罚", category="科技", summary="携程被罚事件",
+            source_url="https://example.com", rank=1, captured_at="2026-01-01",
+        )
+        angle = {"name": "深度分析", "instruction": "分析事件影响", "structure": [], "must_avoid": []}
+        with patch("providers.text_provider.create_http_client") as mock_client:
+            mock_ctx = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_ctx
+            mock_ctx.post.return_value = resp
+            article = ag_generate_article(
+                topic=topic, angle=angle, article_type="analysis",
+                style="documentary", word_count=1000, profile=_make_profile(),
+            )
+            # No INVALID_RESPONSE was raised; article parsed successfully
+            assert article is not None
+            assert "携程被罚" in article.get("title", "")
+            assert article.get("sections") and len(article["sections"]) >= 3
+            assert article.get("content_markdown")
+            assert article.get("body_char_count", 0) > 0
+
+    def test_sse_response_does_not_raise_invalid_response_and_is_parsed(self):
+        """Provider returns SSE → parser_mode='sse' → no INVALID_RESPONSE."""
+        provider = OpenAITextProvider(_make_profile())
+        long_sse = (
+            'data: {"choices":[{"delta":{"content":"# 携程被罚后内部全员信曝光"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"\\n\\n近日携程因违规操作被监管部门处罚，"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"公司内部随即发布全员信说明情况。"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"\\n\\n## 事件发生了什么\\n\\n"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"携程因违反数据安全规定被网信办处以罚款并责令整改。"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"根据公开通报，涉及数据收集范围超出必要限度等问题。"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"\\n\\n## 为什么受到关注\\n\\n"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"携程作为国内领先在线旅游平台，"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"其数据合规问题直接关系到数亿用户的信息安全。"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"\\n\\n## 可能带来哪些影响\\n\\n"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"短期内携程需要投入资源合规整改，"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"长期看数据安全合规将成为行业标配。"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"\\n\\n## 后续值得关注什么\\n\\n"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"整改落实进度和行业其他平台跟进情况值得留意。"}}]}\n\n'
+            'data: [DONE]\n'
+        )
+        resp = _mock_response(long_sse, content_type="text/event-stream")
+        resp.json.side_effect = json.JSONDecodeError("bad", "", 0)
+        with patch("providers.text_provider.create_http_client") as mock_client:
+            mock_ctx = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_ctx
+            mock_ctx.post.return_value = resp
+            result = provider.generate_article(
+                ArticleGenerationRequest(
+                    "请生成文章", temperature=0.6, max_tokens=1600, response_format="none"
+                )
+            )
+            assert "携程被罚" in result
+            assert provider.last_diagnostic["parser_mode"] == "sse"
+
+
+# ── test 10: ARTICLE_PARSE_ERROR and MODEL_OUTPUT_EMPTY enter fallback ──
+
+class TestArticleParseErrorModelOutputEmptyFallback:
+    """Prove that ARTICLE_PARSE_ERROR and MODEL_OUTPUT_EMPTY enter fallback
+    in run_single_task, producing a non-empty article with content_markdown."""
+
+    TOPIC = HotTopic(
+        id="r1-2-ape-fb",
+        title="某热点进入热榜讨论",
+        summary="热榜摘要显示该话题正在引发关注，更多权威信息仍待确认。",
+        source="test-hotlist", source_name="测试热榜",
+        source_url="https://example.com/hot", hot_value="热度 1000",
+    )
+
+    BUNDLE = {
+        "topic_id": "r1-2-ape-fb",
+        "topic_title": "某热点进入热榜讨论",
+        "research_status": "sufficient",
+        "accepted_source_count": 1,
+        "official_or_reliable_source_count": 1,
+        "usable_fact_count": 3,
+        "candidate_link_count": 0,
+        "rejected_source_count": 0,
+        "sources": [{
+            "source_id": "s1", "source_name": "测试机构",
+            "title": "测试事件说明",
+            "published_at": "2026-07-27",
+            "url": "https://example.com/source",
+            "fetch_success": True,
+            "accepted_for_research": True,
+            "source_level": "official",
+        }],
+        "verified_facts": [
+            {"fact_id": "f1", "canonical_fact": "官方渠道已公开发布说明。", "supporting_source_ids": ["s1"]},
+            {"fact_id": "f2", "canonical_fact": "事件仍在发展中，待后续更新。", "supporting_source_ids": ["s1"]},
+        ],
+        "usable_facts": [
+            {"fact_id": "f1", "canonical_fact": "官方渠道已公开发布说明。", "supporting_source_ids": ["s1"]},
+            {"fact_id": "f2", "canonical_fact": "事件仍在发展中，待后续更新。", "supporting_source_ids": ["s1"]},
+        ],
+        "research_fact_cards": [],
+        "background": [],
+        "follow_up": ["继续关注权威来源后续发布。"],
+        "open_questions": [],
+        "timeline": ["2026-07-27 首次报道"],
+    }
+
+    def _run_with_error(self, tmp_path, monkeypatch, error_code: str, error_detail: str = ""):
+        """Helper: run run_single_task with generate_article raising a ProviderError."""
+        monkeypatch.setattr(generation_store, "TASKS_ROOT", tmp_path / "tasks")
+        monkeypatch.setattr(single_task.ResearchService, "collect",
+                           lambda self, topic, references=None, supplemental_text="": dict(self.BUNDLE))
+        # Monkeypatch generate_article to raise the given error
+        def _raise(*args, **kwargs):
+            raise ProviderError(error_code, error_detail)
+        monkeypatch.setattr(single_task, "generate_article", _raise)
+        monkeypatch.setattr(single_task, "analyze_source_overlap",
+                           lambda article, bundle: {"status": "passed", "violations": []})
+
+        store = SQLiteStore(str(tmp_path / f"{error_code}.sqlite"))
+        store.save_topics([self.TOPIC])
+        task = store.create_task(
+            f"R1.2 {error_code}",
+            "multi_topic",
+            [self.TOPIC.to_dict()],
+            1,
+            generation_options={
+                "article_type": "热点资讯", "style": "客观通俗",
+                "image_plan_mode": "none", "word_count": 800,
+            },
+        )
+        return single_task.run_single_task(
+            task,
+            {"api_key": "saved-key", "has_api_key": True, "model": "r1-2-text", "timeout_seconds": 30},
+            {"api_key": "image-key", "model": "test-image"},
+            settings={"network": {}, "image_plan_mode": "none"},
+            store=store,
+        )
+
+    def test_article_parse_error_enters_fallback_and_produces_article(self, tmp_path, monkeypatch):
+        """ARTICLE_PARSE_ERROR → fallback → task completed or warning → article not empty."""
+        result = self._run_with_error(tmp_path, monkeypatch, "ARTICLE_PARSE_ERROR", "模型未返回可读正文")
+        assert result["status"] in ("completed", "partial_success")
+        assert result["provider_error_code"] == "ARTICLE_PARSE_ERROR"
+        assert result["text_generation_result"] == "fallback"
+        # fallback article must be present
+        article = result.get("article") or {}
+        assert article, "fallback article must not be empty"
+        assert article.get("content_markdown"), "content_markdown must not be empty"
+        assert article.get("title"), "title must not be empty"
+        assert article.get("sections") and len(article.get("sections") or []) >= 1
+
+    def test_model_output_empty_enters_fallback_and_produces_article(self, tmp_path, monkeypatch):
+        """MODEL_OUTPUT_EMPTY → fallback → task completed or warning → article not empty."""
+        result = self._run_with_error(tmp_path, monkeypatch, "MODEL_OUTPUT_EMPTY", "text model returned reasoning_content but no content")
+        assert result["status"] in ("completed", "partial_success")
+        assert result["provider_error_code"] == "MODEL_OUTPUT_EMPTY"
+        assert result["text_generation_result"] == "fallback"
+        article = result.get("article") or {}
+        assert article, "fallback article must not be empty"
+        assert article.get("content_markdown"), "content_markdown must not be empty"
+        assert article.get("title"), "title must not be empty"
+
+    def test_non_whitelisted_error_still_raises(self, tmp_path, monkeypatch):
+        """Unknown error codes NOT in whitelist must still raise → task fails."""
+        result = self._run_with_error(tmp_path, monkeypatch, "AUTHENTICATION_FAILED", "bad key")
+        assert result["status"] == "failed"
+        assert result["provider_error_code"] == "AUTHENTICATION_FAILED"
+
+    def test_article_parse_error_no_fallback_throws_in_standalone(self):
+        """Direct call to _parse_markdown_article_response with empty still raises ARTICLE_PARSE_ERROR."""
+        from generation.article_generator import _parse_markdown_article_response
+        topic = HotTopic(
+            id="t1", title="测试", category="科技", summary="测试",
+            source_url="https://example.com", rank=1, captured_at="2026-01-01",
+        )
+        angle = {"name": "分析", "instruction": "test"}
+        with pytest.raises(ProviderError) as exc_info:
+            _parse_markdown_article_response("", topic, angle)
+        assert exc_info.value.code == "ARTICLE_PARSE_ERROR"

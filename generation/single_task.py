@@ -3,6 +3,7 @@
 import json
 import hashlib
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -923,21 +924,22 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                 state["response_format"] = "none"
                 state["text_timeout_seconds"] = int(text_timeout_limit)
                 state["text_max_tokens"] = 1400
+                text_started = time.perf_counter()
                 _persist(state, store)
                 article = generate_article(topic, angle, article_type, style, word_count, effective_text_profile, demo_mode=False, app_mode="production", network_settings=settings.get("network"), rewrite_context=rewrite_context, research_bundle=bundle, generation_stats=generation_stats)
                 state["text_model_finished_at"] = utc_now()
                 state["text_generation_result"] = "success"
-                state["text_model_elapsed_seconds"] = round((state["text_model_finished_at"].timestamp() - state["text_model_started_at"].timestamp()), 1) if state.get("text_model_started_at") and state.get("text_model_finished_at") else 0
+                state["text_model_elapsed_seconds"] = round(time.perf_counter() - text_started, 1)
                 state["text_http_status"] = 200
                 if str(article.get("recommended_status") or "") == "too_short":
                     raise ProviderError("ARTICLE_TOO_SHORT", "\u6a21\u578b\u8fd4\u56de\u6b63\u6587\u8fc7\u77ed")
             except ProviderError as exc:
                 state["text_model_finished_at"] = utc_now()
-                state["text_model_elapsed_seconds"] = round((state["text_model_finished_at"].timestamp() - state["text_model_started_at"].timestamp()), 1) if state.get("text_model_started_at") and state.get("text_model_finished_at") else 0
+                state["text_model_elapsed_seconds"] = round(time.perf_counter() - text_started, 1)
                 state["provider_error_code"] = str(exc.code)
                 state["provider_error_message"] = redact_sensitive_text(str(getattr(exc, "detail", exc)))[:500]
                 state["text_http_status"] = int((getattr(exc, "details", {}) or {}).get("http_status") or 0)
-                if exc.code not in {"TIMEOUT", "ARTICLE_TOO_SHORT", "MODEL_OUTPUT_INVALID", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED"}:
+                if exc.code not in {"TIMEOUT", "ARTICLE_TOO_SHORT", "MODEL_OUTPUT_INVALID", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED", "ARTICLE_PARSE_ERROR", "MODEL_OUTPUT_EMPTY"}:
                     raise
                 used_fallback = True
                 state["text_generation_result"] = "fallback"

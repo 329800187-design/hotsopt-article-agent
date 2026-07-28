@@ -705,13 +705,10 @@ def generate_article(
     call_reason = "full_article" if int(stats.get("text_generation_calls") or 0) == 0 else str((rewrite_context or {}).get("reason_code") or "rewrite")
     _register_text_generation_call(stats, call_reason)
     token_budget = 1600 if requested_word_count <= 1000 else 2000
-    response = provider.generate_article(
-        ArticleGenerationRequest(
-            generation_prompt,
-            temperature=0.6,
-            max_tokens=token_budget,
-            response_format="none",
-        )
+    response = provider.generate(
+        generation_prompt,
+        temperature=0.6,
+        max_tokens=token_budget,
     )
     stripped = _strip_code_fence(response)
     parsed: dict[str, Any] | None = None
