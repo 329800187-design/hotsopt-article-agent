@@ -7,15 +7,38 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_ENV = "HOTSPOT_DATA_ROOT"
+INSTALL_MODE_ENV = "HOTSPOT_INSTALL_MODE"
+INSTALLED_USER_DATA_ROOT = os.environ.get("LOCALAPPDATA", "") and Path(os.environ["LOCALAPPDATA"]) / "热点图文批量生产工作台"
+
+
+def is_installed() -> bool:
+    """Detect whether running from a bundled install (Programs dir) vs dev source."""
+    if os.environ.get(INSTALL_MODE_ENV) == "1":
+        return True
+    project_str = str(PROJECT_ROOT).lower().replace("\\", "/")
+    return "/programs/热点图文批量生产工作台" in project_str
+
+
+def user_data_root() -> Path:
+    """Return the per-user data directory, independent of install location."""
+    if is_installed():
+        return INSTALLED_USER_DATA_ROOT
+    return PROJECT_ROOT / "data"
 
 
 def data_root() -> Path:
     configured = os.environ.get(DATA_ENV)
-    return Path(configured).expanduser().resolve() if configured else PROJECT_ROOT / "data"
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return user_data_root()
 
 
 def config_dir() -> Path:
-    return PROJECT_ROOT / "config" if not os.environ.get(DATA_ENV) else data_root() / "config"
+    if os.environ.get(DATA_ENV):
+        return data_root() / "config"
+    if is_installed():
+        return INSTALLED_USER_DATA_ROOT / "config"
+    return PROJECT_ROOT / "config"
 
 
 def settings_path() -> Path:
@@ -43,15 +66,36 @@ def cache_path() -> Path:
 
 
 def exports_root() -> Path:
-    return PROJECT_ROOT / "export" / "user" if not os.environ.get(DATA_ENV) else data_root() / "exports"
+    if os.environ.get(DATA_ENV):
+        return data_root() / "exports"
+    if is_installed():
+        return INSTALLED_USER_DATA_ROOT / "exports"
+    return PROJECT_ROOT / "export" / "user"
 
 
 def logs_root() -> Path:
-    return PROJECT_ROOT / "logs" if not os.environ.get(DATA_ENV) else data_root() / "logs"
+    if os.environ.get(DATA_ENV):
+        return data_root() / "logs"
+    if is_installed():
+        return INSTALLED_USER_DATA_ROOT / "logs"
+    return PROJECT_ROOT / "logs"
 
 
 def runtime_root() -> Path:
     return data_root() / "runtime"
+
+
+def license_root() -> Path:
+    """License files live in user data, not install dir."""
+    return INSTALLED_USER_DATA_ROOT / "license" if is_installed() else PROJECT_ROOT / "data" / "license"
+
+
+def installed_legacy_config_dir() -> Path | None:
+    """Old install-dir config path (pre-R1.2 persistence fix), for migration."""
+    if not is_installed():
+        return None
+    legacy = Path(PROJECT_ROOT) / "config"
+    return legacy if legacy.exists() else None
 
 
 def ensure_user_data_dirs() -> None:

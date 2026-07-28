@@ -15,6 +15,7 @@ import importlib.metadata as pkg_metadata
 import json
 import os
 from pathlib import Path
+import shutil as _shutil_mod
 import socket
 import subprocess
 import sys
@@ -227,10 +228,69 @@ def _write_json(path: Path, value: dict[str, object]) -> None:
     temporary.replace(path)
 
 
+shutil_copy = _shutil_mod.copy2
+
+
+def _process_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def _is_installed_dir(root: Path) -> bool:
+    root_str = str(root).lower().replace("\\", "/")
+    return "/programs/热点图文批量生产工作台" in root_str
+
+
+def _installed_user_data_root() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if local_app_data:
+        return Path(local_app_data) / "热点图文批量生产工作台"
+    return Path.home() / "AppData" / "Local" / "热点图文批量生产工作台"
+
+
+def _migrate_installed_config(install_root: Path, user_data_root: Path) -> str:
+    """Migrate settings and credentials from old install-dir config to user data dir."""
+    old_config = install_root / "config"
+    new_config = user_data_root / "config"
+    old_settings = old_config / "settings.json"
+    old_creds = old_config / "credentials.dat"
+    if not old_settings.exists() and not old_creds.exists():
+        return "CONFIG_MIGRATION_SOURCE_MISSING"
+    if new_config.exists() and (new_config / "settings.json").exists():
+        return "CONFIG_MIGRATION_NOT_NEEDED"
+    new_config.mkdir(parents=True, exist_ok=True)
+    migrated = False
+    if old_settings.exists() and not (new_config / "settings.json").exists():
+        shutil_copy(old_settings, new_config / "settings.json")
+        migrated = True
+    if old_creds.exists() and not (new_config / "credentials.dat").exists():
+        shutil_copy(old_creds, new_config / "credentials.dat")
+        migrated = True
+    if migrated:
+        try:
+            from modules.credential_store import load_secret
+            key = load_secret("text_profile_api_key")
+            if key:
+                return "CONFIG_MIGRATION_SUCCESS"
+            return "CONFIG_MIGRATION_DPAPI_FAILED"
+        except Exception:
+            return "CONFIG_MIGRATION_DPAPI_FAILED"
+    return "CONFIG_MIGRATION_NOT_NEEDED"
+
+
 class DesktopHost:
     def __init__(self, root: Path | None = None) -> None:
         self.root = (root or Path(__file__).resolve().parent).resolve()
-        self.data_root = Path(os.environ.get("HOTSPOT_DATA_ROOT") or Path(os.environ.get("LOCALAPPDATA", self.root / "data")) / "热点图文工作台").resolve()
+        self._installed = _is_installed_dir(self.root)
+        if self._installed:
+            self.data_root = _installed_user_data_root()
+        else:
+            self.data_root = self.root / "data"
+        if os.environ.get("HOTSPOT_DATA_ROOT"):
+            self.data_root = Path(os.environ["HOTSPOT_DATA_ROOT"]).expanduser().resolve()
         self.runtime_root = self.data_root / "runtime"
         self.logs_root = self.data_root / "logs"
         self.startup_log = self.logs_root / "startup.log"
@@ -242,19 +302,22 @@ class DesktopHost:
         self.window = None
         self.lock = SingleInstance(self.runtime_root / "desktop.lock")
         self._shutdown_started = False
+        self._api_restart_count = 0
 
     @property
     def web_url(self) -> str:
         return f"http://127.0.0.1:{self.web_port}"
 
     def prepare_environment(self) -> None:
+        if self._installed:
+            os.environ["HOTSPOT_INSTALL_MODE"] = "1"
         os.environ["HOTSPOT_DATA_ROOT"] = str(self.data_root)
         os.environ["HOTSPOT_DESKTOP"] = "1"
         os.environ["HOTSPOT_NO_BROWSER"] = "1"
         os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
         os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
         sys.path.insert(0, str(self.root))
-        from modules.app_paths import migrate_legacy_data
+        from modules.app_paths import migrate_legacy_data, is_installed
         from modules.database import init_db
 
         try:
@@ -265,6 +328,9 @@ class DesktopHost:
             raise StartupError("START-DATABASE-001", "本地数据库初始化失败。", exc) from exc
         self.runtime_root.mkdir(parents=True, exist_ok=True)
         self.logs_root.mkdir(parents=True, exist_ok=True)
+        if self._installed:
+            migration_status = _migrate_installed_config(self.root, self.data_root)
+            self._write_startup_log(f"config_migration={migration_status}")
 
     def _write_startup_log(self, message: str) -> None:
         try:
@@ -299,6 +365,7 @@ class DesktopHost:
 
     def start_backend(self) -> None:
         self.prepare_environment()
+        self._clean_stale_runtime_files()
         self.api_port = _find_available_port(PREFERRED_API_PORT)
         self.web_port = _find_available_port(PREFERRED_WEB_PORT, {self.api_port})
         os.environ["HOTSPOT_API_PORT"] = str(self.api_port)
@@ -308,39 +375,106 @@ class DesktopHost:
         python = self._python_executable()
         self._write_startup_log(f"version={APP_VERSION}")
         self._write_startup_log(f"install_path={self.root}")
+        self._write_startup_log(f"data_root={self.data_root}")
+        self._write_startup_log(f"installed={self._installed}")
         self._write_startup_log(f"python_path={python}")
         self._write_startup_log(f"pywebview_version={_module_version('pywebview')}")
         self._write_startup_log(f"webview2_available={_webview2_runtime_available()}")
         kwargs = _hidden_startup_kwargs(self._open_process_log())
-        self.api_process = subprocess.Popen([python, "-m", "uvicorn", "api:app", "--host", "127.0.0.1", "--port", str(self.api_port)], env=os.environ.copy(), **kwargs)
-        self.web_process = subprocess.Popen([python, "-m", "streamlit", "run", str(self.root / "app.py"), "--server.address", "127.0.0.1", "--server.headless", "true", "--server.port", str(self.web_port), "--browser.gatherUsageStats", "false"], env=os.environ.copy(), **kwargs)
-        common_meta = {
-            "version": APP_VERSION,
-            "install_path": str(self.root),
-            "data_path": str(self.data_root),
-            "main_pid": os.getpid(),
-            "api_pid": self.api_process.pid,
-            "web_pid": self.web_process.pid,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        }
-        api_meta = {**common_meta, "pid": self.api_process.pid, "port": self.api_port, "kind": "api"}
-        web_meta = {**common_meta, "pid": self.web_process.pid, "port": self.web_port, "kind": "web"}
-        _write_json(self.runtime_root / "api.json", api_meta)
-        _write_json(self.runtime_root / "web.json", web_meta)
-        # Keep the historical metadata names for portable diagnostics and clean
-        # shutdown scripts; they contain no user-facing connection information.
-        _write_json(self.runtime_root / "api.pid", api_meta)
-        _write_json(self.runtime_root / "web.pid", web_meta)
+
+        # ---- Step 1: Start API only ----
+        self._start_api_process(python, kwargs)
+        self._write_startup_log(f"api_pid={self.api_process.pid} api_port={self.api_port}")
+
+        # ---- Step 2: Wait for API health (max 20s) ----
         try:
-            self._wait_for(lambda: self._api_healthy(token), STARTUP_TIMEOUT_SECONDS)
-        except TimeoutError as exc:
-            self._write_startup_log(f"API 进程退出码={self.api_process.poll() if self.api_process else 'missing'}")
-            raise StartupError("START-API-001", "本地 API 服务启动失败。", exc) from exc
+            self._wait_for(lambda: self._api_healthy(token), 20)
+            self._write_startup_log("API_HEALTH_BEFORE_STREAMLIT_PASS")
+        except TimeoutError:
+            self._write_startup_log(f"API_START_TIMEOUT exit_code={self.api_process.poll()}")
+            if self._api_restart_count < 1:
+                self._api_restart_count += 1
+                self._write_startup_log("API_SINGLE_AUTO_RESTART_ATTEMPT")
+                self._stop_process(self.api_process)
+                self._start_api_process(python, kwargs)
+                try:
+                    self._wait_for(lambda: self._api_healthy(token), 20)
+                    self._write_startup_log("API_RESTART_SUCCESS API_SINGLE_AUTO_RESTART_PASS")
+                except TimeoutError:
+                    self._write_startup_log(f"API_RESTART_FAILED exit_code={self.api_process.poll()}")
+                    raise StartupError("START-API-001", "本地服务启动失败。请重新启动软件。", None)
+            else:
+                raise StartupError("START-API-001", "本地服务启动失败。请重新启动软件。", None)
+
+        self._write_startup_log("API_STARTUP_WAIT_PASS")
+        # Write api.json immediately after API is healthy
+        self._write_runtime_file("api.json", self.api_process.pid, self.api_port, "api")
+
+        # ---- Step 3: Start Streamlit only after API is healthy ----
+        env = os.environ.copy()
+        self.web_process = subprocess.Popen(
+            [python, "-m", "streamlit", "run", str(self.root / "app.py"),
+             "--server.address", "127.0.0.1", "--server.headless", "true",
+             "--server.port", str(self.web_port), "--browser.gatherUsageStats", "false"],
+            env=env, **kwargs
+        )
+        self._write_startup_log(f"web_pid={self.web_process.pid} web_port={self.web_port}")
+
+        # ---- Step 4: Wait for Streamlit ----
         try:
             self._wait_for(self._web_healthy, STARTUP_TIMEOUT_SECONDS)
+            self._write_startup_log("STREAMLIT_HEALTH_PASS")
         except TimeoutError as exc:
             self._write_startup_log(f"Streamlit 进程退出码={self.web_process.poll() if self.web_process else 'missing'}")
             raise StartupError("START-STREAMLIT-001", "本地界面服务启动失败。", exc) from exc
+
+        self._write_runtime_file("web.json", self.web_process.pid, self.web_port, "web")
+
+    def _start_api_process(self, python: str, kwargs: dict[str, object]) -> None:
+        env = os.environ.copy()
+        self.api_process = subprocess.Popen(
+            [python, "-m", "uvicorn", "api:app", "--host", "127.0.0.1", "--port", str(self.api_port)],
+            env=env, **kwargs
+        )
+
+    def _clean_stale_runtime_files(self) -> None:
+        """Remove runtime files from processes that are no longer running."""
+        for name in ("api.json", "web.json", "api.pid", "web.pid"):
+            rf = self.runtime_root / name
+            try:
+                if rf.exists():
+                    data = json.loads(rf.read_text(encoding="utf-8"))
+                    pid = int(data.get("pid") or 0)
+                    if pid and not _process_running(pid):
+                        rf.unlink(missing_ok=True)
+            except Exception:
+                try:
+                    rf.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    def _write_runtime_file(self, filename: str, pid: int, port: int, kind: str) -> None:
+        self.runtime_root.mkdir(parents=True, exist_ok=True)
+        from modules.app_paths import config_dir, settings_path
+        from modules.credential_store import credential_path
+        meta = {
+            "pid": pid,
+            "port": port,
+            "kind": kind,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "version": APP_VERSION,
+            "install_path": str(self.root),
+            "working_directory": str(self.root),
+            "app_data_dir": str(self.data_root),
+            "config_dir": str(config_dir()),
+            "settings_path": str(settings_path()),
+            "credential_path": str(credential_path()),
+            "main_pid": os.getpid(),
+        }
+        _write_json(self.runtime_root / filename, meta)
+        # Also write legacy .pid files for backward compat
+        if filename in ("api.json", "web.json"):
+            _write_json(self.runtime_root / filename.replace(".json", ".pid"), meta)
 
     def _api_healthy(self, token: str) -> bool:
         try:

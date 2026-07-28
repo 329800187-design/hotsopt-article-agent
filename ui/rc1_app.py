@@ -1518,8 +1518,26 @@ def _settings_page(settings: dict[str, Any], save_settings: Any, root: Path, res
                 image_values.update({"api_key": text_key or "***", "has_api_key": bool(text_key or image.get("has_api_key"))})
                 settings["image_profile"] = image_values
             save_settings(settings)
-            st.session_state["rc132_text_status"] = "已保存，尚未检测"
-            st.success("文本配置已保存")
+            # ---- Verify save actually persisted ----
+            try:
+                from modules.config_store import load_settings as _reload_settings
+                from modules.credential_store import load_secret as _load_secret
+                from modules.app_paths import config_dir as _config_dir
+                _reloaded = _reload_settings()
+                _tp = _reloaded.get("text_profile", {})
+                _has_key = bool(_tp.get("has_api_key"))
+                _ref = str(_tp.get("credential_ref") or "")
+                if not _has_key or not _ref:
+                    st.error("TEXT_CONFIG_SAVE_FAILED：配置写入后验证失败，请重试。")
+                else:
+                    _key = _load_secret(_ref)
+                    if not _key:
+                        st.error("TEXT_CREDENTIAL_VERIFY_FAILED：密钥加密保存后无法解密，请重试。")
+                    else:
+                        st.session_state["rc132_text_status"] = "已保存，尚未检测"
+                        st.success(f"文本配置已安全保存。\\n\\n保存位置：{_config_dir()}")
+            except Exception:
+                st.error("TEXT_CREDENTIAL_PATH_INVALID：配置保存路径异常，请重启软件后重试。")
         if text_discover.button("检测可用模型", disabled=restricted, use_container_width=True, key="rc132_text_discover"):
             try:
                 result = _api("POST", "/models/text/discover", timeout=45, json={"profile_kind": "text", "use_for_both": shared, "profile": {"name": text_provider, "api_key": text_key, "base_url": text_base, "endpoint": text_endpoint}})
