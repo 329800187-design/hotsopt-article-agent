@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,59 @@ from providers.text_provider import ProviderError, _headers
 
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
+DATA_URI_RE = re.compile(r"^data:(?P<mime>image/(?:png|jpeg|jpg|webp));base64,(?P<data>[A-Za-z0-9+/=\r\n]+)$", re.I)
+
+
+def _first_string(value: Any, keys: list[str]) -> str:
+    if isinstance(value, dict):
+        for key in keys:
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+    return ""
+
+
+def _image_item_from_response(data: Any, native_dashscope: bool = False) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    if native_dashscope:
+        choices = data.get("output", {}).get("choices", []) if isinstance(data.get("output"), dict) else []
+        content = choices[0].get("message", {}).get("content", []) if choices and isinstance(choices[0], dict) else []
+        if isinstance(content, list):
+            native_image = next((part.get("image") for part in content if isinstance(part, dict) and part.get("image")), None)
+            if isinstance(native_image, str) and native_image.strip():
+                return {"image": native_image.strip()}
+    candidates: list[Any] = []
+    if isinstance(data.get("data"), list):
+        candidates.extend(data.get("data") or [])
+    if isinstance(data.get("output"), dict):
+        output = data.get("output") or {}
+        for key in ("images", "results", "data"):
+            if isinstance(output.get(key), list):
+                candidates.extend(output.get(key) or [])
+        candidates.append(output)
+    if isinstance(data.get("images"), list):
+        candidates.extend(data.get("images") or [])
+    candidates.append(data)
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return {"image": candidate.strip()}
+        if isinstance(candidate, dict):
+            value = _first_string(candidate, ["b64_json", "base64", "image_base64", "image", "data", "url", "image_url"])
+            if value:
+                return dict(candidate)
+    return {}
+
+
+def _decode_image_string(value: str) -> tuple[str, bytes | str]:
+    cleaned = str(value or "").strip()
+    match = DATA_URI_RE.match(cleaned)
+    if match:
+        return "data_uri", base64.b64decode(match.group("data"), validate=True)
+    parsed = urlparse(cleaned)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return "url", cleaned
+    return "base64", base64.b64decode(cleaned, validate=True)
 
 
 def normalize_image_size(size: Any, api_format: str | None = None) -> str:
@@ -133,24 +187,21 @@ class OpenAIImageProvider:
                 raise ProviderError("RATE_LIMITED", "image model rate limited", parse_retry_after(response.headers.get("Retry-After")))
             response.raise_for_status()
             data = response.json()
-            item: dict[str, Any] = data.get("data", [{}])[0]
-            if native_dashscope:
-                choices = data.get("output", {}).get("choices", []) if isinstance(data.get("output"), dict) else []
-                content = choices[0].get("message", {}).get("content", []) if choices and isinstance(choices[0], dict) else []
-                native_image = next((part.get("image") for part in content if isinstance(part, dict) and part.get("image")), None) if isinstance(content, list) else None
-                item = {"url": native_image} if native_image else {}
+            item = _image_item_from_response(data, native_dashscope=native_dashscope)
+            payload_value = _first_string(item, ["b64_json", "base64", "image_base64", "image", "data", "url", "image_url"])
+            if not payload_value:
+                raise ProviderError("UNSUPPORTED_RESPONSE_FORMAT", "image response has no URL or base64 payload")
+            response_type, payload_data = _decode_image_string(payload_value)
             request.output_path.parent.mkdir(parents=True, exist_ok=True)
-            if item.get("b64_json"):
-                self.last_response_type = "base64"
-                request.output_path.write_bytes(base64.b64decode(item["b64_json"], validate=True))
-            elif item.get("url"):
+            if response_type == "url":
                 self.last_response_type = "url"
                 with create_http_client({**self.network_settings, "timeout_seconds": 60}) as client:
-                    image = client.get(str(item["url"]))
+                    image = client.get(str(payload_data))
                     image.raise_for_status()
                     request.output_path.write_bytes(image.content)
             else:
-                raise ProviderError("UNSUPPORTED_RESPONSE_FORMAT", "image response has no URL or base64 payload")
+                self.last_response_type = response_type
+                request.output_path.write_bytes(payload_data if isinstance(payload_data, bytes) else bytes(payload_data))
             inspect_image(request.output_path)
             return request.output_path
         except httpx.TimeoutException as exc:
