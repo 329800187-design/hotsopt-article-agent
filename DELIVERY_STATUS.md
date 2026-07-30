@@ -2,11 +2,11 @@
 
 Current branch: `fix/r1.3-customer-delivery-final`
 
-Current HEAD: pending `feat: expand deduplicated hotspot pool` commit
+Current HEAD: `da8f214de3aa770c79eb94f208c22ea3c1ffbe2d`
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
-Current phase: hotspot pool source expansion and final delivery closure
+Current phase: Mac closure complete; Windows installation and real-image handoff
 
 ## Completed
 
@@ -22,6 +22,11 @@ Current phase: hotspot pool source expansion and final delivery closure
 - Added submit-once asynchronous image tasks, normalized `task_id`/`request_id`/`job_id`, bounded polling, controlled backoff, terminal-state mapping and cancellation checks.
 - Preserved cancellation through cover and inline generation, retained compatibility with existing provider test doubles, and kept Registry-backed provider labels visible to UI audits.
 - Expanded the default hotspot source set across Toutiao, Weibo, Zhihu, Baidu, Bilibili and Douyin TopHub boards; an unconfigured custom DailyHot endpoint no longer prevents fallback sources from starting.
+- Added per-provider health diagnostics, multi-platform TopHub overview ingestion, stronger live-topic normalization/deduplication, and reproducible final hotspot evidence.
+- Restored annotated tag `freeze-r1.2-before-research-fix`; peeled target is `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`.
+- Completed real-network hotspot refresh with 431 live topics before global deduplication and 200 after deduplication; all 200 have URL/source identifiers and current-cycle capture timestamps, with zero cached topics counted.
+- Completed final Mac full suite with raw environment and pytest logs.
+- Completed final Mac security scan with `SECURITY_SCAN_PASS` and no forbidden hits.
 - P1 API integration blocker previously resolved: `4 passed, 6 deselected`.
 - Production license gate tests previously rerun: `12 passed`.
 - Security scan previous result: `SECURITY_SCAN_PASS`.
@@ -30,10 +35,8 @@ Current phase: hotspot pool source expansion and final delivery closure
 ## Not Completed
 
 - Real image provider smoke with two validated generated images.
-- Hotspot pool verification with at least 200 deduplicated usable topics.
 - Final installed Windows customer flow: install, launch, activation, model setup, article+image generation, Word/ZIP export, restart recovery, uninstall.
 - Final Setup and customer delivery ZIP.
-- Final full test suite run after all delivery changes.
 
 ## Recent Test Results
 
@@ -41,16 +44,18 @@ Current phase: hotspot pool source expansion and final delivery closure
 - P0-A Registry/config targeted: `16 passed`.
 - P0-C image adapter/provider targeted: `18 passed` including provider registry and image budget smoke.
 - P0-C2 async/two-image targeted: `36 passed`.
-- Full Mac suite: `911 passed, 13 skipped, 13 failed`; failures are 7 Windows DPAPI/install-only cases, 4 license-gated API persistence cases, and 2 fixed cross-platform/image-UI compatibility cases pending rerun.
+- Final Mac full suite: `921 passed, 18 skipped, 1 warning` in 54.72 seconds; exit code 0.
+- The five newly explicit Mac skips are Windows DPAPI credential-persistence tests.
 - Export targeted: `43 passed`.
-- Hotspot targeted: `99 passed`; real refresh returned 145 deduplicated topics with URLs and timestamps from 3 currently responsive providers.
+- Hotspot targeted: `101 passed`.
+- Final live hotspot evidence: 431 before deduplication, 200 after deduplication, 200 with URL/source identifier, 200 with capture time, 0 cached.
 - Article/research targeted after Provider Registry: `57 passed`.
 - RC: last known `307 passed, 2 skipped`.
 - P1 non-API: last known `258 passed, 4 deselected`.
 - P1 API: `4 passed, 6 deselected`.
 - other: final log shows `135 passed`.
 - phase: last known `208 passed`.
-- security scan: last known `SECURITY_SCAN_PASS`.
+- Final security scan: `SECURITY_SCAN_PASS`, `forbidden_hits=[]`, 339 files scanned.
 
 ## Recent Real Smoke
 
@@ -58,9 +63,21 @@ Current phase: hotspot pool source expansion and final delivery closure
 - Smoke B: rewritten body Chinese count `1463`, model call succeeded, Word export succeeded.
 - Image real smoke for current final delivery branch: not completed.
 
+## Windows Handoff Checklist
+
+1. Pull `fix/r1.3-customer-delivery-final` and verify the restored freeze tag.
+2. Confirm the .NET SDK and repair the native launcher build.
+3. Resolve the `desktop_host.py` package-audit false positive without weakening the real secret gate.
+4. Run the complete Windows test suite and verify DPAPI and license flows.
+5. Build Setup; install; launch from the desktop; activate; save and test text/image model profiles.
+6. Refresh at least 200 live hotspots.
+7. Generate one real article with one cover and one inline image; validate both images.
+8. Export Word and ZIP; restart and verify history recovery and single-instance behavior.
+9. Uninstall and verify the intended user-data retention policy.
+
 ## Next Command
 
-`python -m pytest tests/test_core.py tests/test_phase1_full.py tests/test_phase1_final_closure.py tests/test_p1_hf1_targeted.py tests/test_rc1_3_3_lite.py -q --tb=short`
+`git fetch --all --tags --prune`
 
 ## Gates
 

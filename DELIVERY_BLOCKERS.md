@@ -10,29 +10,29 @@
 2. Full customer delivery closure has not been executed from an installed Windows build.
    - Required: install, desktop launch, activation, text model test, image model test, hotspot refresh, article+two-image generation, Word export, ZIP export, restart recovery, uninstall.
 
-3. Provider Registry first implementation completed.
-   - Remaining work is request-side provider adaptation, async image execution,
-     two-image task lifecycle, real image smoke and final delivery closure.
+3. Real image provider smoke is externally blocked.
+   - No verified funded image-provider credential is available in the Mac handoff environment.
+   - Minimum remaining paid validation: 2 calls for one cover image and one inline image.
+   - Required closure: validate both files, export Word, export ZIP, and retain provider evidence without recording the API key.
 
-4. Image generation closure P0-C is not verified.
-   - Need two real images, file validation, retry isolation, and image result consistency.
-
-5. Hotspot pool target is not verified.
-   - Required deduplicated usable hotspots: `>= 200`.
-   - Current real Mac refresh: 145 usable topics from 3 responsive providers.
-   - Toutiao official returned 404; NewsNow returned a non-JSON response; several TopHub boards returned no parseable rows.
-
-6. The expected freeze tag is not visible in the remote GitHub refs API.
-   - Expected: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`.
-   - No tag has been created, moved, or rewritten during this handoff.
+4. Windows-only validation remains outstanding.
+   - Required: DPAPI, license, native launcher, Setup, install/uninstall, single instance, restart recovery and user-data policy.
 
 ## Not Blockers
 
 - Current text API credential was previously verified by direct and software connection after key replacement.
 - P1 API integration failure was caused by test harness isolation/license setup, not article generation code.
 - Freeze baseline tag remains intact.
+- Provider Registry, image request adapters, asynchronous polling, cancellation/timeout, two-image lifecycle and export integration are implemented and covered by tests.
+- Live hotspot target passed with 200 deduplicated current-cycle topics and zero cached entries counted.
+- Annotated freeze tag is restored and peels to `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`.
+- Mac full suite passed: `921 passed, 18 skipped`.
+- Mac security scan passed with no forbidden hits.
 
 ## External Blockers
 
-- If real image provider key, quota, or model permission is unavailable, record it here and keep `CUSTOMER_DELIVERY_ALLOWED=false`.
 - Windows-only DPAPI, installed-user-data, license-gated API, Setup and launcher validation remain external to the Mac closure run.
+
+BUILD_ALLOWED=false
+
+CUSTOMER_DELIVERY_ALLOWED=false
