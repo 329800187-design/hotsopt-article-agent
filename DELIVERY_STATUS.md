@@ -2,11 +2,13 @@
 
 Current branch: `fix/r1.3-customer-delivery-final`
 
-Current HEAD: `d21e14ee8d3f4c6d0c00c9dd6fec484c97bd0175`
+Mac handoff base: `449b924b03be38964d6d46a4d9a89ea87ad2e3dd`
+
+Windows CI workflow introduced at: `c969109a5968a232fda49892e5935ebe438db0af`
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
-Current phase: Mac closure complete; Windows installation and real-image handoff
+Current phase: Windows GitHub Actions validation, installed-app closure and real-image handoff
 
 ## Completed
 
@@ -27,13 +29,15 @@ Current phase: Mac closure complete; Windows installation and real-image handoff
 - Completed real-network hotspot refresh with 431 live topics before global deduplication and 200 after deduplication; all 200 have URL/source identifiers and current-cycle capture timestamps, with zero cached topics counted.
 - Completed final Mac full suite with raw environment and pytest logs.
 - Completed final Mac security scan with `SECURITY_SCAN_PASS` and no forbidden hits.
+- Added `.github/workflows/windows-delivery-ci.yml` using a real `windows-latest` runner.
+- Windows CI now covers full pytest, DPAPI/license behavior through the complete Windows suite, security scan, .NET launcher reproducibility, portable runtime packaging, Inno Setup compilation, SHA inventory and diagnostic artifact upload.
 - P1 API integration blocker previously resolved: `4 passed, 6 deselected`.
 - Production license gate tests previously rerun: `12 passed`.
-- Security scan previous result: `SECURITY_SCAN_PASS`.
 - Real text smoke evidence exists for two articles with `used_local_fallback=false` and empty `fallback_kind`.
 
 ## Not Completed
 
+- First Windows Delivery CI run and diagnostic artifact review.
 - Real image provider smoke with two validated generated images.
 - Final installed Windows customer flow: install, launch, activation, model setup, article+image generation, Word/ZIP export, restart recovery, uninstall.
 - Final Setup and customer delivery ZIP.
@@ -55,7 +59,8 @@ Current phase: Mac closure complete; Windows installation and real-image handoff
 - P1 API: `4 passed, 6 deselected`.
 - other: final log shows `135 passed`.
 - phase: last known `208 passed`.
-- Final security scan: `SECURITY_SCAN_PASS`, `forbidden_hits=[]`, 353 files scanned.
+- Final Mac security scan: `SECURITY_SCAN_PASS`, `forbidden_hits=[]`, 353 files scanned.
+- Windows CI: triggered by the status handoff push; results and artifacts pending GitHub Actions execution.
 
 ## Recent Real Smoke
 
@@ -66,18 +71,20 @@ Current phase: Mac closure complete; Windows installation and real-image handoff
 ## Windows Handoff Checklist
 
 1. Pull `fix/r1.3-customer-delivery-final` and verify the restored freeze tag.
-2. Confirm the .NET SDK and repair the native launcher build.
-3. Resolve the `desktop_host.py` package-audit false positive without weakening the real secret gate.
-4. Run the complete Windows test suite and verify DPAPI and license flows.
-5. Build Setup; install; launch from the desktop; activate; save and test text/image model profiles.
-6. Refresh at least 200 live hotspots.
-7. Generate one real article with one cover and one inline image; validate both images.
-8. Export Word and ZIP; restart and verify history recovery and single-instance behavior.
-9. Uninstall and verify the intended user-data retention policy.
+2. Review the Windows Delivery CI run and download `windows-delivery-evidence-*`.
+3. Fix all CI failures without weakening DPAPI, license, security or package gates.
+4. Confirm the .NET SDK and repair the native launcher build.
+5. Resolve any `desktop_host.py` package-audit false positive without weakening the real secret gate.
+6. Run the complete Windows test suite and verify DPAPI and license flows.
+7. Build Setup; install; launch from the desktop; activate; save and test text/image model profiles.
+8. Refresh at least 200 live hotspots.
+9. Generate one real article with one cover and one inline image; validate both images.
+10. Export Word and ZIP; restart and verify history recovery and single-instance behavior.
+11. Uninstall and verify the intended user-data retention policy.
 
 ## Next Command
 
-`git fetch --all --tags --prune`
+`Review the Windows Delivery CI run for fix/r1.3-customer-delivery-final and download windows-delivery-evidence-*`
 
 ## Gates
 
