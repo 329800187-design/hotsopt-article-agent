@@ -2,11 +2,11 @@
 
 Current branch: `fix/r1.3-customer-delivery-final`
 
-Current HEAD: pending `fix: complete image provider request adapters` commit
+Current HEAD: pending `feat: support asynchronous image task polling` commit
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
-Current phase: P0-C2 asynchronous image task polling
+Current phase: P0-C2 two-image generation lifecycle and export closure
 
 ## Completed
 
@@ -19,6 +19,7 @@ Current phase: P0-C2 asynchronous image task polling
 - Moved UI provider preset source to Registry via `ui/rc1_app.py`.
 - Added image response adapter support for OpenAI `b64_json`, URL fetch, plain base64 fields, Data URI payloads, Dashscope native `image`, and post-write raster validation.
 - Wired Registry request/response adapters into image runtime profiles and prevented duplicated version paths such as `/v1/v1/images/generations`.
+- Added submit-once asynchronous image tasks, normalized `task_id`/`request_id`/`job_id`, bounded polling, controlled backoff, terminal-state mapping and cancellation checks.
 - P1 API integration blocker previously resolved: `4 passed, 6 deselected`.
 - Production license gate tests previously rerun: `12 passed`.
 - Security scan previous result: `SECURITY_SCAN_PASS`.
@@ -37,6 +38,7 @@ Current phase: P0-C2 asynchronous image task polling
 - `compileall`: PASS on `providers`, `generation`, `modules`, `ui`, and new provider tests.
 - P0-A Registry/config targeted: `16 passed`.
 - P0-C image adapter/provider targeted: `18 passed` including provider registry and image budget smoke.
+- P0-C2 async/two-image targeted: `36 passed`.
 - Article/research targeted after Provider Registry: `57 passed`.
 - RC: last known `307 passed, 2 skipped`.
 - P1 non-API: last known `258 passed, 4 deselected`.
@@ -53,7 +55,7 @@ Current phase: P0-C2 asynchronous image task polling
 
 ## Next Command
 
-`python -m pytest tests/test_image_provider_async.py -q --tb=short`
+`python -m pytest tests/test_p1_hf2_2_targeted.py tests/test_phase2a5_final_closure.py -q --tb=short`
 
 ## Gates
 

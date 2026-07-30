@@ -5,7 +5,7 @@ import hashlib
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -20,6 +20,25 @@ from providers.text_provider import ProviderError, _headers
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 DATA_URI_RE = re.compile(r"^data:(?P<mime>image/(?:png|jpeg|jpg|webp));base64,(?P<data>[A-Za-z0-9+/=\r\n]+)$", re.I)
+TERMINAL_IMAGE_TASK_STATUSES = {"succeeded", "failed", "cancelled", "timeout"}
+IMAGE_TASK_STATUS_ALIASES = {
+    "pending": "pending",
+    "queued": "pending",
+    "submitted": "pending",
+    "running": "running",
+    "processing": "running",
+    "in_progress": "running",
+    "succeeded": "succeeded",
+    "success": "succeeded",
+    "completed": "succeeded",
+    "finished": "succeeded",
+    "failed": "failed",
+    "error": "failed",
+    "cancelled": "cancelled",
+    "canceled": "cancelled",
+    "timeout": "timeout",
+    "timed_out": "timeout",
+}
 
 
 def _first_string(value: Any, keys: list[str]) -> str:
@@ -61,6 +80,22 @@ def _image_item_from_response(data: Any, native_dashscope: bool = False) -> dict
             if value:
                 return dict(candidate)
     return {}
+
+
+def _nested_string(data: Any, keys: tuple[str, ...]) -> str:
+    candidates = [data]
+    if isinstance(data, dict):
+        candidates.extend(data.get(key) for key in ("output", "data", "result", "task") if isinstance(data.get(key), dict))
+    for candidate in candidates:
+        value = _first_string(candidate, list(keys))
+        if value:
+            return value
+    return ""
+
+
+def _task_status(data: Any) -> str:
+    raw = _nested_string(data, ("task_status", "status", "state")).lower().replace("-", "_").replace(" ", "_")
+    return IMAGE_TASK_STATUS_ALIASES.get(raw, "pending" if raw else "")
 
 
 def _decode_image_string(value: str) -> tuple[str, bytes | str]:
@@ -151,6 +186,141 @@ class OpenAIImageProvider:
         self.last_response_type = ""
         self.generation_calls = 0
 
+    def _native_dashscope(self) -> bool:
+        return (
+            str(self.profile.get("response_adapter") or "") == "dashscope_image_or_openai_image"
+            or str(self.profile.get("api_format") or "").lower() == "dashscope_native"
+        )
+
+    def _write_image_result(self, data: Any, output_path: Path) -> Path:
+        item = _image_item_from_response(data, native_dashscope=self._native_dashscope())
+        payload_value = _first_string(item, ["b64_json", "base64", "image_base64", "image", "data", "url", "image_url"])
+        if not payload_value:
+            raise ProviderError("UNSUPPORTED_RESPONSE_FORMAT", "image response has no URL or base64 payload")
+        response_type, payload_data = _decode_image_string(payload_value)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if response_type == "url":
+            self.last_response_type = "url"
+            with create_http_client({**self.network_settings, "timeout_seconds": 60}) as client:
+                image = client.get(str(payload_data))
+                image.raise_for_status()
+                content_type = str(image.headers.get("content-type") or "").lower()
+                if content_type and not content_type.startswith("image/"):
+                    raise ProviderError("INVALID_RESPONSE", "image URL returned a non-image response")
+                output_path.write_bytes(image.content)
+        else:
+            self.last_response_type = response_type
+            output_path.write_bytes(payload_data if isinstance(payload_data, bytes) else bytes(payload_data))
+        inspect_image(output_path)
+        return output_path
+
+    def submit_image_task(self, request: ImageGenerationRequest) -> dict[str, Any]:
+        """Submit exactly once and return a normalized sync/async task envelope."""
+        api_key = str(self.profile.get("api_key") or "")
+        if not api_key and str(self.profile.get("auth_type") or "bearer").lower() != "none":
+            raise ProviderError("MODEL_NOT_CONFIGURED", "image model API key is missing")
+        base_url = str(self.profile.get("base_url") or "").rstrip("/")
+        endpoint = str(self.profile.get("endpoint") or "/images/generations")
+        url = normalize_endpoint_url(base_url, endpoint)
+        headers = _headers(self.profile)
+        if self._native_dashscope() and str(self.profile.get("sync_or_async") or "sync").lower() == "async":
+            headers["X-DashScope-Async"] = "enable"
+        response: httpx.Response | None = None
+        try:
+            self.generation_calls += 1
+            timeout = float(self.profile.get("timeout_seconds") or self.network_settings.get("timeout_seconds") or 180)
+            with create_http_client({**self.network_settings, "timeout_seconds": timeout}) as client:
+                response = client.post(url, headers=headers, json=build_image_request_payload(self.profile, request.prompt))
+            self.last_http_status = response.status_code
+            if response.status_code == 401:
+                raise ProviderError("AUTHENTICATION_FAILED", "image model authentication failed")
+            if response.status_code == 404:
+                content_type = str(response.headers.get("content-type") or "").lower()
+                if "text/html" in content_type or "text/plain" in content_type:
+                    raise ProviderError("IMAGE_GENERATION_NOT_SUPPORTED", "image generation endpoint is unavailable")
+                raise ProviderError("MODEL_NOT_FOUND", "image model endpoint or model was not found")
+            if response.status_code == 429:
+                from providers.errors import parse_retry_after
+                raise ProviderError("RATE_LIMITED", "image model rate limited", parse_retry_after(response.headers.get("Retry-After")))
+            response.raise_for_status()
+            data = response.json()
+            if _image_item_from_response(data, native_dashscope=self._native_dashscope()):
+                return {"status": "succeeded", "result": data, "output_path": request.output_path}
+            task_id = _nested_string(data, ("task_id", "request_id", "job_id", "id"))
+            if not task_id:
+                raise ProviderError("UNSUPPORTED_RESPONSE_FORMAT", "image response has neither image data nor task identifier")
+            return {
+                "status": _task_status(data) or "pending",
+                "task_id": task_id,
+                "request_id": _nested_string(data, ("request_id",)),
+                "job_id": _nested_string(data, ("job_id",)),
+                "result": data,
+                "output_path": request.output_path,
+            }
+        except httpx.TimeoutException as exc:
+            raise ProviderError("TIMEOUT", "image model response timed out") from exc
+        except httpx.HTTPError as exc:
+            raise map_provider_exception(exc, response) from exc
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise map_provider_exception(exc, response) from exc
+
+    def poll_image_task(
+        self,
+        task: dict[str, Any],
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        if str(task.get("status") or "") == "succeeded":
+            return task
+        task_id = str(task.get("task_id") or task.get("request_id") or task.get("job_id") or "")
+        if not task_id:
+            raise ProviderError("INVALID_REQUEST", "image task identifier is missing")
+        strategy = str(self.profile.get("polling_strategy") or "generic_task_status")
+        endpoint_template = str(self.profile.get("poll_endpoint") or "")
+        if not endpoint_template:
+            endpoint_template = "/api/v1/tasks/{task_id}" if strategy == "dashscope_task_status" else f"{str(self.profile.get('endpoint') or '/images/generations').rstrip('/')}/{{task_id}}"
+        poll_url = normalize_endpoint_url(self.profile.get("base_url"), endpoint_template.format(task_id=task_id))
+        max_attempts = max(1, min(120, int(self.profile.get("max_poll_attempts") or 30)))
+        max_seconds = max(1.0, min(1800.0, float(self.profile.get("max_poll_seconds") or 300)))
+        delay = max(0.0, min(10.0, float(self.profile.get("poll_interval_seconds") or 1)))
+        started = time.monotonic()
+        for attempt in range(1, max_attempts + 1):
+            if cancel_check and cancel_check():
+                raise ProviderError("TASK_CANCELLED", "用户已取消图片生成")
+            if time.monotonic() - started >= max_seconds:
+                raise ProviderError("TIMEOUT", "图片生成等待超时，请稍后重试")
+            with create_http_client({**self.network_settings, "timeout_seconds": min(60.0, max_seconds)}) as client:
+                response = client.get(poll_url, headers=_headers(self.profile))
+            self.last_http_status = response.status_code
+            response.raise_for_status()
+            data = response.json()
+            status = _task_status(data)
+            normalized = {**task, "status": status or "pending", "result": data, "poll_attempts": attempt}
+            if status == "succeeded" or _image_item_from_response(data, native_dashscope=self._native_dashscope()):
+                normalized["status"] = "succeeded"
+                return normalized
+            if status == "failed":
+                detail = _nested_string(data, ("message", "error_message", "error")) or "图片生成任务失败"
+                raise ProviderError("IMAGE_TASK_FAILED", redact_sensitive_text(detail))
+            if status == "cancelled":
+                raise ProviderError("TASK_CANCELLED", "图片生成任务已取消")
+            if status == "timeout":
+                raise ProviderError("TIMEOUT", "图片生成任务超时")
+            if attempt < max_attempts and delay:
+                time.sleep(min(delay * (1.5 ** (attempt - 1)), 10.0))
+        raise ProviderError("TIMEOUT", "图片生成轮询次数已达上限，请稍后重试")
+
+    def extract_image_result(self, task: dict[str, Any], output_path: Path | None = None) -> Path:
+        if str(task.get("status") or "") != "succeeded":
+            raise ProviderError("INVALID_RESPONSE", "image task has not succeeded")
+        target = output_path or task.get("output_path")
+        if not isinstance(target, Path):
+            target = Path(str(target or ""))
+        if not str(target):
+            raise ProviderError("INVALID_REQUEST", "image output path is missing")
+        return self._write_image_result(task.get("result"), target)
+
     def check_configuration(self) -> ModelTestResult:
         """Validate image settings only; this method never calls the image endpoint."""
         started = time.perf_counter()
@@ -180,62 +350,18 @@ class OpenAIImageProvider:
             detail = str(getattr(mapped, "detail", mapped))
             return ModelTestResult(False, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, error_code=code, error_message=user_facing_error_message(code, redact_sensitive_text(detail)), retryable=is_retryable_error(code), details={"generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
 
-    def generate(self, prompt: str, output_path: Path) -> Path:
-        return self.generate_image(ImageGenerationRequest(prompt, output_path))
+    def generate(
+        self,
+        prompt: str,
+        output_path: Path,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> Path:
+        request = ImageGenerationRequest(prompt, output_path)
+        task = self.submit_image_task(request)
+        task = self.poll_image_task(task, cancel_check=cancel_check)
+        return self.extract_image_result(task, output_path)
 
     def generate_image(self, request: ImageGenerationRequest) -> Path:
-        api_key = str(self.profile.get("api_key") or "")
-        if not api_key and str(self.profile.get("auth_type") or "bearer").lower() != "none":
-            raise ProviderError("MODEL_NOT_CONFIGURED", "image model API key is missing")
-        base_url = str(self.profile.get("base_url") or "").rstrip("/")
-        endpoint = str(self.profile.get("endpoint") or "/images/generations")
-        if not base_url:
-            raise ProviderError("MODEL_NOT_CONFIGURED", "image model base URL is missing")
-        url = normalize_endpoint_url(base_url, endpoint)
-        response_adapter = str(self.profile.get("response_adapter") or "")
-        native_dashscope = response_adapter == "dashscope_image_or_openai_image" or str(self.profile.get("api_format") or "").lower() == "dashscope_native"
-        payload = build_image_request_payload(self.profile, request.prompt)
-        response: httpx.Response | None = None
-        try:
-            self.generation_calls += 1
-            timeout = float(self.profile.get("timeout_seconds") or self.network_settings.get("timeout_seconds") or 180)
-            with create_http_client({**self.network_settings, "timeout_seconds": timeout}) as client:
-                response = client.post(url, headers=_headers(self.profile), json=payload)
-            self.last_http_status = response.status_code
-            if response.status_code == 401:
-                raise ProviderError("AUTHENTICATION_FAILED", "image model authentication failed")
-            if response.status_code == 404:
-                content_type = str(response.headers.get("content-type") or "").lower()
-                if "text/html" in content_type or "text/plain" in content_type:
-                    raise ProviderError("IMAGE_GENERATION_NOT_SUPPORTED", "image generation endpoint is unavailable")
-                raise ProviderError("MODEL_NOT_FOUND", "image model endpoint or model was not found")
-            if response.status_code == 429:
-                from providers.errors import parse_retry_after
-                raise ProviderError("RATE_LIMITED", "image model rate limited", parse_retry_after(response.headers.get("Retry-After")))
-            response.raise_for_status()
-            data = response.json()
-            item = _image_item_from_response(data, native_dashscope=native_dashscope)
-            payload_value = _first_string(item, ["b64_json", "base64", "image_base64", "image", "data", "url", "image_url"])
-            if not payload_value:
-                raise ProviderError("UNSUPPORTED_RESPONSE_FORMAT", "image response has no URL or base64 payload")
-            response_type, payload_data = _decode_image_string(payload_value)
-            request.output_path.parent.mkdir(parents=True, exist_ok=True)
-            if response_type == "url":
-                self.last_response_type = "url"
-                with create_http_client({**self.network_settings, "timeout_seconds": 60}) as client:
-                    image = client.get(str(payload_data))
-                    image.raise_for_status()
-                    request.output_path.write_bytes(image.content)
-            else:
-                self.last_response_type = response_type
-                request.output_path.write_bytes(payload_data if isinstance(payload_data, bytes) else bytes(payload_data))
-            inspect_image(request.output_path)
-            return request.output_path
-        except httpx.TimeoutException as exc:
-            raise ProviderError("TIMEOUT", "image model response timed out") from exc
-        except httpx.HTTPError as exc:
-            raise map_provider_exception(exc, response) from exc
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise map_provider_exception(exc, response) from exc
+        task = self.submit_image_task(request)
+        task = self.poll_image_task(task)
+        return self.extract_image_result(task, request.output_path)

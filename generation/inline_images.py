@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import shutil
 import uuid
@@ -366,7 +367,15 @@ def run_inline_images(
         raw_path = temp_root / "raw"
         final_tmp = temp_root / f"{image_id}.png"
         try:
-            provider.generate(str(asset.get("prompt") or ""), raw_path)
+            generate_parameters = inspect.signature(provider.generate).parameters
+            if "cancel_check" in generate_parameters:
+                provider.generate(
+                    str(asset.get("prompt") or ""),
+                    raw_path,
+                    cancel_check=lambda: bool((load_generation_task(task_id) or {}).get("cancellation_requested")),
+                )
+            else:
+                provider.generate(str(asset.get("prompt") or ""), raw_path)
             inspect_image(raw_path)
             with task_lock(task_id):
                 state = load_generation_task(task_id) or state

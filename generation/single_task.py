@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import inspect
 import shutil
 import time
 from pathlib import Path
@@ -1312,7 +1313,11 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
         image_provider = OpenAIImageProvider(image_profile, network_settings=settings.get("network"))
         reserve_image_generation_call(state)
         _persist(state, store)
-        image_provider.generate(cover_prompt, raw_path)
+        generate_parameters = inspect.signature(image_provider.generate).parameters
+        if "cancel_check" in generate_parameters:
+            image_provider.generate(cover_prompt, raw_path, cancel_check=lambda: is_cancel_requested(task["task_id"]))
+        else:
+            image_provider.generate(cover_prompt, raw_path)
         _check_cancel(task["task_id"])
         inspect_image(raw_path)
         add_cover_title(raw_path, str(article.get("title") or topic.title), work_cover_path)
@@ -1516,7 +1521,5 @@ def cancel_single_task(task_id: str, store: SQLiteStore | None = None) -> dict[s
         if state.get("status") in {"queued", "failed", "partial_success"}:
             state.update({"status": "cancelled", "stage": "cancelled", "error_code": "TASK_CANCELLED", "safe_error_message": "task cancellation requested", "next_retry_at": None, "retryable": False})
         return _persist(state, store)
-
-
 
 
