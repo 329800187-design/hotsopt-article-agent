@@ -1,0 +1,78 @@
+{
+  "root": "/Users/mac/Documents/Codex/2026-07-31/xian/hotsopt-article-agent-api",
+  "files_scanned": 339,
+  "binary_files_scanned": 10,
+  "allowed_hits": [
+    {
+      "path": "desktop_host.py",
+      "categories": [
+        "secret_assignment"
+      ]
+    },
+    {
+      "path": "start_backend_dev.py",
+      "categories": [
+        "secret_assignment"
+      ]
+    }
+  ],
+  "test_fixture_hits": [
+    {
+      "path": "tests/test_phase1_closure.py",
+      "categories": [
+        "proxy_credentials"
+      ]
+    },
+    {
+      "path": "tests/test_phase1_final_closure.py",
+      "categories": [
+        "auth_assignment",
+        "bearer_token",
+        "proxy_credentials",
+        "secret_assignment"
+      ]
+    },
+    {
+      "path": "tests/test_phase2a.py",
+      "categories": [
+        "proxy_credentials"
+      ]
+    },
+    {
+      "path": "tests/test_phase2a5_final_closure.py",
+      "categories": [
+        "auth_assignment",
+        "bearer_token",
+        "secret_assignment"
+      ]
+    },
+    {
+      "path": "tests/test_rc1_3_1_security_and_final_state.py",
+      "categories": [
+        "openai_key",
+        "secret_assignment"
+      ]
+    },
+    {
+      "path": "tests/test_rc1_3_2_hardening.py",
+      "categories": [
+        "secret_assignment"
+      ]
+    },
+    {
+      "path": "tests/test_rc1_3_3_lite_r2_2_3.py",
+      "categories": [
+        "bearer_token"
+      ]
+    },
+    {
+      "path": "tests/test_rc_regex_integrity.py",
+      "categories": [
+        "proxy_credentials"
+      ]
+    }
+  ],
+  "runtime_artifact_hits": [],
+  "forbidden_hits": [],
+  "status": "SECURITY_SCAN_PASS"
+}

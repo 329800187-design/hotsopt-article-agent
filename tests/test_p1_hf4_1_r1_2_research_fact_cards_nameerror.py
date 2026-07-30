@@ -78,6 +78,19 @@ license_service.license_root = lambda: root / "license"
 license_service.PUBLIC_KEY_PATH = public_path
 license_service.ACTIVE_LICENSE_PATH = root / "license" / "active.license"
 license_service.STATE_PATH = root / "license" / "license_state.json"
+secrets = {{}}
+def fake_save(name, secret, path=None):
+    secrets[(str(path), name)] = secret
+    if path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({{"schema_version": "fake-dpapi-v1", "blob": "FAKE_DPAPI_TEST_BLOB"}}), encoding="utf-8")
+    return "dpapi:" + name
+def fake_load(reference, path=None):
+    return secrets.get((str(path), str(reference or "").removeprefix("dpapi:")), "")
+device_identity.save_secret = fake_save
+device_identity.load_secret = fake_load
+license_service.save_secret = fake_save
+license_service.load_secret = fake_load
 now = datetime.now(timezone.utc).replace(microsecond=0)
 value = {{
     "schema_version": 1,

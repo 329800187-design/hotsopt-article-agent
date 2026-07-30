@@ -103,6 +103,7 @@ def test_install_mode_config_dir_is_user_data():
 # 3. Save → settings + credentials synced
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI credential persistence")
 def test_save_writes_settings_and_credentials(isolated_config):
     """Saving a key should create settings.json and credentials.dat."""
     settings = load_settings()
@@ -130,6 +131,7 @@ def test_save_writes_settings_and_credentials(isolated_config):
 # 4. Save → re-read → decrypt verification
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI credential persistence")
 def test_save_verify_decrypt_roundtrip(isolated_config):
     """After save, DPAPI decrypt should return original key."""
     settings = load_settings()
@@ -155,6 +157,7 @@ def test_save_verify_decrypt_roundtrip(isolated_config):
 # 5. Restart persistence (simulate close + reopen)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI credential persistence")
 def test_restart_persistence(isolated_config):
     """Key should survive a simulated restart (reload from disk)."""
     settings = load_settings()
@@ -181,6 +184,7 @@ def test_restart_persistence(isolated_config):
 # 6. Reinstall persistence (simulate overwrite install)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI credential persistence")
 def test_reinstall_persistence(isolated_config):
     """After simulated reinstall (settings/credentials exist in user data dir),
     config should still be readable."""
@@ -207,6 +211,7 @@ def test_reinstall_persistence(isolated_config):
 # 7. No plaintext key in settings.json
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI credential persistence")
 def test_no_plaintext_key_in_settings(isolated_config):
     """After save, settings.json should NOT contain the plaintext api_key."""
     settings = load_settings()

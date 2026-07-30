@@ -116,6 +116,7 @@ def test_CURRENT_TEXT_FORM_KEY_ACTUALLY_USED_PASS(monkeypatch):
         return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]})
 
     monkeypatch.setattr(api, "load_settings", lambda: {"text_profile": {"api_key": "Key-A", "base_url": "https://mock.local/v1", "model": "old-model", "endpoint": "/chat/completions"}, "network": {}})
+    monkeypatch.setattr(api, "save_settings", lambda _settings: None)
     monkeypatch.setattr(text_provider, "create_http_client", lambda *_args, **_kwargs: httpx.Client(transport=httpx.MockTransport(handler), base_url="https://mock.local"))
     response = TestClient(api.app).post("/api/models/text/test", json={"profile": {"api_key": "Key-B", "base_url": "https://mock.local/v1", "model": "gpt-4o-mini", "endpoint": "/chat/completions"}})
     assert response.json()["success"] is True

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import time
 from typing import Any
+
+import httpx
 
 from hot_sources.cache import LocalCacheProvider
 from hot_sources.dedupe import deduplicate_topics
@@ -9,7 +12,7 @@ from hot_sources.manual import ManualHotSource
 from hot_sources.newsnow import NewsNowSource
 from hot_sources.registry import get_daily_source
 from hot_sources.toutiao_official import ToutiaoOfficialSource
-from hot_sources.tophub import TopHubToutiaoSource
+from hot_sources.tophub import TopHubOverviewSource, TopHubToutiaoSource
 from modules.database import DB_PATH, SQLiteStore, get_store
 from modules.models import HotTopic, utc_now
 from modules.topic_cache import TopicCacheStore, get_default_cache_store
@@ -40,6 +43,7 @@ class HotTrendService:
                 self.providers.append(get_daily_source(daily_url, network_settings=network_settings))
             self.providers.extend([
                 NewsNowSource(network_settings=network_settings),
+                TopHubOverviewSource(network_settings=network_settings),
                 TopHubToutiaoSource(network_settings=network_settings),
                 TopHubToutiaoSource(network_settings=network_settings, endpoint="https://tophub.today/n/KqndgxeLl9", provider_name="tophub_weibo", display_name="今日热榜 微博"),
                 TopHubToutiaoSource(network_settings=network_settings, endpoint="https://tophub.today/n/mproPpoq6O", provider_name="tophub_zhihu", display_name="今日热榜 知乎"),
@@ -64,13 +68,41 @@ class HotTrendService:
             "topics": [{"rank": item.rank, "title": item.title, "hot_value": item.hot_value, "category": item.category, "source_name": item.source_name, "captured_at": item.captured_at, "source_url": item.source_url} for item in topics[:10]],
         }
 
+    @staticmethod
+    def _failure_code(exc: Exception) -> str:
+        if isinstance(exc, httpx.TimeoutException):
+            return "TIMEOUT"
+        if isinstance(exc, httpx.HTTPStatusError):
+            return {
+                403: "HTTP_403",
+                404: "HTTP_404",
+                429: "HTTP_429",
+            }.get(exc.response.status_code, f"HTTP_{exc.response.status_code}")
+        text = str(exc).lower()
+        if "expecting value" in text or "non-json" in text:
+            return "NON_JSON_RESPONSE"
+        if "没有识别" in str(exc):
+            return "HTML_STRUCTURE_CHANGED"
+        if "empty" in text or "为空" in str(exc):
+            return "EMPTY_RESULT"
+        if "dns" in text or "name or service not known" in text:
+            return "DNS_ERROR"
+        if "ssl" in text or "tls" in text or "certificate" in text:
+            return "TLS_ERROR"
+        return "PARSE_ERROR"
+
     def refresh(self) -> dict[str, Any]:
         errors: list[str] = []
         merged_topics: list[HotTopic] = []
         successful_providers: list[tuple[str, str, str]] = []
+        provider_diagnostics: list[dict[str, Any]] = []
+        refresh_started = time.perf_counter()
         for provider in self.providers:
+            provider_started = time.perf_counter()
+            request_url = str(getattr(provider, "url", "") or getattr(provider, "endpoint", "") or "")
             try:
-                topics = deduplicate_topics(provider.fetch_trends())
+                fetched_topics = provider.fetch_trends()
+                topics = deduplicate_topics(fetched_topics)
                 for topic in topics:
                     topic.provider_status = "online"
                     topic.is_cached = False
@@ -79,13 +111,41 @@ class HotTrendService:
                 self.store.save_provider_status(provider.provider_name, provider.display_name, "online", provider.last_success_at, None)
                 merged_topics.extend(topics)
                 successful_providers.append((provider.provider_name, provider.display_name, provider.last_success_at or utc_now()))
+                provider_diagnostics.append({
+                    "provider_name": provider.provider_name,
+                    "request_url": request_url,
+                    "http_status": int(getattr(provider, "last_http_status", 200) or 200),
+                    "content_type": str(getattr(provider, "last_content_type", "") or ""),
+                    "raw_item_count": int(getattr(provider, "last_raw_item_count", len(fetched_topics)) or 0),
+                    "normalized_item_count": len(fetched_topics),
+                    "deduplicated_item_count": len(topics),
+                    "elapsed_ms": int((time.perf_counter() - provider_started) * 1000),
+                    "failure_code": "",
+                    "failure_message": "",
+                    "captured_at": provider.last_success_at or utc_now(),
+                })
             except Exception as exc:
                 detail = classify_network_error(exc)
                 provider.last_error = detail["message"]
                 safe_display_name = redact_sensitive_text(provider.display_name)
                 errors.append(f"{safe_display_name} [{detail['category']}]: {detail['message']}")
                 self.store.save_provider_status(provider.provider_name, provider.display_name, "error", provider.last_success_at, detail["message"])
+                response = getattr(exc, "response", None)
+                provider_diagnostics.append({
+                    "provider_name": provider.provider_name,
+                    "request_url": request_url,
+                    "http_status": int(getattr(response, "status_code", 0) or 0),
+                    "content_type": str(getattr(response, "headers", {}).get("content-type") or ""),
+                    "raw_item_count": 0,
+                    "normalized_item_count": 0,
+                    "deduplicated_item_count": 0,
+                    "elapsed_ms": int((time.perf_counter() - provider_started) * 1000),
+                    "failure_code": self._failure_code(exc),
+                    "failure_message": redact_sensitive_text(str(exc))[:500],
+                    "captured_at": utc_now(),
+                })
         if merged_topics:
+            pre_dedupe_total = len(merged_topics)
             topics = deduplicate_topics(merged_topics)[:200]
             captured_at = max((topic.captured_at for topic in topics if topic.captured_at), default=utc_now())
             primary_name, primary_display, _ = successful_providers[0]
@@ -96,7 +156,25 @@ class HotTrendService:
             evidence = self._hotlist_evidence(safe_topics, provider_name=primary_name, status="online", captured_at=captured_at)
             evidence["provider_names"] = [name for name, _, _ in successful_providers]
             evidence["provider_count"] = len(successful_providers)
-            return {"topics": safe_topics, "provider_name": primary_name, "display_name": display_name, "status": "online", "is_cached": False, "stale": False, "captured_at": captured_at, "errors": errors, "last_error": "", "hotlist_evidence": evidence}
+            return {
+                "topics": safe_topics,
+                "provider_name": primary_name,
+                "display_name": display_name,
+                "status": "online",
+                "is_cached": False,
+                "stale": False,
+                "captured_at": captured_at,
+                "errors": errors,
+                "last_error": "",
+                "hotlist_evidence": evidence,
+                "provider_diagnostics": provider_diagnostics,
+                "pre_dedupe_live_topics": pre_dedupe_total,
+                "deduplicated_live_topics": len(safe_topics),
+                "topics_with_url_or_identifier": sum(bool(item.source_url or item.source) for item in safe_topics),
+                "topics_with_captured_at": sum(bool(item.captured_at) for item in safe_topics),
+                "cached_topic_count": 0,
+                "elapsed_ms": int((time.perf_counter() - refresh_started) * 1000),
+            }
         try:
             topics = deduplicate_topics(self.cache_provider.fetch_trends())
             self.store.save_topics(topics, record_observation=False)
@@ -106,7 +184,7 @@ class HotTrendService:
             warning = "本地缓存已过期" if stale else ""
             self.store.save_provider_status(self.cache_provider.provider_name, self.cache_provider.display_name, "online" if not stale else "stale", self.cache_provider.last_success_at, warning)
             captured_at = safe_topics[0].captured_at if safe_topics else utc_now()
-            return {"topics": safe_topics, "provider_name": self.cache_provider.provider_name, "display_name": self.cache_provider.display_name, "status": "cached", "is_cached": True, "stale": stale, "captured_at": captured_at, "errors": errors, "last_error": "；".join(errors + ([warning] if warning else [])), "hotlist_evidence": self._hotlist_evidence(safe_topics, provider_name=self.cache_provider.provider_name, status="cached", captured_at=captured_at, cache_age_seconds=age)}
+            return {"topics": safe_topics, "provider_name": self.cache_provider.provider_name, "display_name": self.cache_provider.display_name, "status": "cached", "is_cached": True, "stale": stale, "captured_at": captured_at, "errors": errors, "last_error": "；".join(errors + ([warning] if warning else [])), "hotlist_evidence": self._hotlist_evidence(safe_topics, provider_name=self.cache_provider.provider_name, status="cached", captured_at=captured_at, cache_age_seconds=age), "provider_diagnostics": provider_diagnostics, "pre_dedupe_live_topics": 0, "deduplicated_live_topics": 0, "topics_with_url_or_identifier": 0, "topics_with_captured_at": 0, "cached_topic_count": len(safe_topics), "cache_age_seconds": age, "elapsed_ms": int((time.perf_counter() - refresh_started) * 1000)}
         except Exception as exc:
             detail = classify_network_error(exc)
             safe_display_name = redact_sensitive_text(self.cache_provider.display_name)
