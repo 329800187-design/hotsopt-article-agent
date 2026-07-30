@@ -20,6 +20,10 @@
 5. Hotspot pool target is not verified.
    - Required deduplicated usable hotspots: `>= 200`.
 
+6. The expected freeze tag is not visible in the remote GitHub refs API.
+   - Expected: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`.
+   - No tag has been created, moved, or rewritten during this handoff.
+
 ## Not Blockers
 
 - Current text API credential was previously verified by direct and software connection after key replacement.
@@ -29,3 +33,4 @@
 ## External Blockers
 
 - If real image provider key, quota, or model permission is unavailable, record it here and keep `CUSTOMER_DELIVERY_ALLOWED=false`.
+- Windows-only DPAPI, installed-user-data, license-gated API, Setup and launcher validation remain external to the Mac closure run.

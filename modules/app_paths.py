@@ -8,7 +8,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_ENV = "HOTSPOT_DATA_ROOT"
 INSTALL_MODE_ENV = "HOTSPOT_INSTALL_MODE"
-INSTALLED_USER_DATA_ROOT = os.environ.get("LOCALAPPDATA", "") and Path(os.environ["LOCALAPPDATA"]) / "热点图文批量生产工作台"
+INSTALLED_USER_DATA_ROOT = (
+    Path(os.environ["LOCALAPPDATA"]) / "热点图文批量生产工作台"
+    if os.environ.get("LOCALAPPDATA")
+    else PROJECT_ROOT / "data" / "installed-user"
+)
 
 
 def is_installed() -> bool:

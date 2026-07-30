@@ -204,7 +204,7 @@ class OpenAIImageProvider:
             with create_http_client({**self.network_settings, "timeout_seconds": 60}) as client:
                 image = client.get(str(payload_data))
                 image.raise_for_status()
-                content_type = str(image.headers.get("content-type") or "").lower()
+                content_type = str(getattr(image, "headers", {}).get("content-type") or "").lower()
                 if content_type and not content_type.startswith("image/"):
                     raise ProviderError("INVALID_RESPONSE", "image URL returned a non-image response")
                 output_path.write_bytes(image.content)

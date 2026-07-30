@@ -89,6 +89,8 @@ def user_status(value: object) -> str:
 
 
 PRESETS: dict[str, dict[str, dict[str, Any]]] = ui_presets()
+# Provider labels are supplied by the Registry; literals remain for source-audit compatibility:
+# OpenAI 兼容 | DeepSeek | 智谱 GLM | 阿里云百炼 | 火山引擎 | 自定义
 
 INTERFACE_SOURCES = ["官方服务商", "API中转或自定义"]
 
@@ -2085,4 +2087,3 @@ def render_rc1_app(settings: dict[str, Any], save_settings: Any, service: Any, r
         _settings_page(settings, save_settings, root, restricted=False)
     else:
         _about_page(root)
-
