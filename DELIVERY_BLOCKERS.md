@@ -1,0 +1,30 @@
+# Delivery Blockers
+
+## Active Blockers
+
+1. Final Windows Setup build is not passing.
+   - Last build attempt log: `data/logs/final_p1_api_setup_build.txt`.
+   - Observed blocker: missing `.NET SDK` for native launcher build.
+   - Observed blocker: source package audit flags `desktop_host.py` token variable as a sensitive assignment.
+
+2. Full customer delivery closure has not been executed from an installed Windows build.
+   - Required: install, desktop launch, activation, text model test, image model test, hotspot refresh, article+two-image generation, Word export, ZIP export, restart recovery, uninstall.
+
+3. Provider Registry P0-A is not implemented.
+   - Text/image profiles are not yet fully data-driven through a registry with explicit adapters.
+
+4. Image generation closure P0-C is not verified.
+   - Need two real images, file validation, retry isolation, and image result consistency.
+
+5. Hotspot pool target is not verified.
+   - Required deduplicated usable hotspots: `>= 200`.
+
+## Not Blockers
+
+- Current text API credential was previously verified by direct and software connection after key replacement.
+- P1 API integration failure was caused by test harness isolation/license setup, not article generation code.
+- Freeze baseline tag remains intact.
+
+## External Blockers
+
+- If real image provider key, quota, or model permission is unavailable, record it here and keep `CUSTOMER_DELIVERY_ALLOWED=false`.
