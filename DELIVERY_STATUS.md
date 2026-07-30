@@ -2,7 +2,7 @@
 
 Current branch: `fix/r1.3-customer-delivery-final`
 
-Current HEAD: `da8f214de3aa770c79eb94f208c22ea3c1ffbe2d`
+Current HEAD: `d21e14ee8d3f4c6d0c00c9dd6fec484c97bd0175`
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
@@ -44,7 +44,7 @@ Current phase: Mac closure complete; Windows installation and real-image handoff
 - P0-A Registry/config targeted: `16 passed`.
 - P0-C image adapter/provider targeted: `18 passed` including provider registry and image budget smoke.
 - P0-C2 async/two-image targeted: `36 passed`.
-- Final Mac full suite: `921 passed, 18 skipped, 1 warning` in 54.72 seconds; exit code 0.
+- Final Mac full suite: `921 passed, 18 skipped, 1 warning` in 54.12 seconds; exit code 0.
 - The five newly explicit Mac skips are Windows DPAPI credential-persistence tests.
 - Export targeted: `43 passed`.
 - Hotspot targeted: `101 passed`.
@@ -55,7 +55,7 @@ Current phase: Mac closure complete; Windows installation and real-image handoff
 - P1 API: `4 passed, 6 deselected`.
 - other: final log shows `135 passed`.
 - phase: last known `208 passed`.
-- Final security scan: `SECURITY_SCAN_PASS`, `forbidden_hits=[]`, 339 files scanned.
+- Final security scan: `SECURITY_SCAN_PASS`, `forbidden_hits=[]`, 353 files scanned.
 
 ## Recent Real Smoke
 
