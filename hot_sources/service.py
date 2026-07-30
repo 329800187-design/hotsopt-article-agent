@@ -31,12 +31,22 @@ class HotTrendService:
         else:
             self.cache_store = TopicCacheStore(self.store.db_path.parent / "cache" / "latest_topics.json", environment="test")
         network_settings = settings.get("network", {})
-        self.providers = providers if providers is not None else [
-            ToutiaoOfficialSource(network_settings=network_settings),
-            get_daily_source(settings.get("hot_source_url", ""), network_settings=network_settings),
-            NewsNowSource(network_settings=network_settings),
-            TopHubToutiaoSource(network_settings=network_settings),
-        ]
+        if providers is not None:
+            self.providers = providers
+        else:
+            self.providers = [ToutiaoOfficialSource(network_settings=network_settings)]
+            daily_url = str(settings.get("hot_source_url") or "").strip()
+            if daily_url:
+                self.providers.append(get_daily_source(daily_url, network_settings=network_settings))
+            self.providers.extend([
+                NewsNowSource(network_settings=network_settings),
+                TopHubToutiaoSource(network_settings=network_settings),
+                TopHubToutiaoSource(network_settings=network_settings, endpoint="https://tophub.today/n/KqndgxeLl9", provider_name="tophub_weibo", display_name="今日热榜 微博"),
+                TopHubToutiaoSource(network_settings=network_settings, endpoint="https://tophub.today/n/mproPpoq6O", provider_name="tophub_zhihu", display_name="今日热榜 知乎"),
+                TopHubToutiaoSource(network_settings=network_settings, endpoint="https://tophub.today/n/Jb0vmloB1G", provider_name="tophub_baidu", display_name="今日热榜 百度"),
+                TopHubToutiaoSource(network_settings=network_settings, endpoint="https://tophub.today/n/74KvxwokxM", provider_name="tophub_bilibili", display_name="今日热榜 哔哩哔哩"),
+                TopHubToutiaoSource(network_settings=network_settings, endpoint="https://tophub.today/n/DpQvNABoNE", provider_name="tophub_douyin", display_name="今日热榜 抖音"),
+            ])
         self.cache_provider = cache_provider if cache_provider is not None else LocalCacheProvider(self.cache_store)
 
     @staticmethod

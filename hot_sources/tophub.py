@@ -23,10 +23,21 @@ class TopHubToutiaoSource(HotProvider):
         re.S | re.I,
     )
 
-    def __init__(self, timeout_seconds: int = 20, network_settings: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        timeout_seconds: int = 20,
+        network_settings: dict[str, Any] | None = None,
+        *,
+        endpoint: str | None = None,
+        provider_name: str | None = None,
+        display_name: str | None = None,
+    ) -> None:
         super().__init__()
         self.timeout_seconds = timeout_seconds
         self.network_settings = network_settings or {}
+        self.endpoint = str(endpoint or type(self).endpoint)
+        self.provider_name = str(provider_name or type(self).provider_name)
+        self.display_name = str(display_name or type(self).display_name)
 
     def health_check(self) -> dict[str, Any]:
         try:
@@ -43,7 +54,7 @@ class TopHubToutiaoSource(HotProvider):
         url = html.unescape(str(item.get("url") or self.endpoint)).strip()
         hot_value = re.sub(r"\s+", "", html.unescape(str(item.get("hot") or ""))).strip()
         rank = int(item.get("rank") or index)
-        identifier = hashlib.sha1(f"tophub_toutiao:{title}".encode("utf-8")).hexdigest()[:16]
+        identifier = hashlib.sha1(f"{self.provider_name}:{title}".encode("utf-8")).hexdigest()[:16]
         return HotTopic(
             id=identifier,
             source=self.provider_name,
@@ -53,7 +64,7 @@ class TopHubToutiaoSource(HotProvider):
             rank=rank,
             hot_value=hot_value,
             source_url=url,
-            summary=f"TopHub 今日头条热榜第 {rank} 位，热度 {hot_value}。",
+            summary=f"{self.display_name}第 {rank} 位，热度 {hot_value}。",
             captured_at=captured_at,
             raw_data=item,
         )

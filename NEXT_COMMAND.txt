@@ -1,1 +1,1 @@
-python -m pytest tests/test_rc1_delivery.py tests/test_rc1_3_3_lite.py tests/test_p1_hf4_1_r1_2_manual_export.py -q --tb=short
+python -m pytest tests/test_core.py tests/test_phase1_full.py tests/test_phase1_final_closure.py tests/test_p1_hf1_targeted.py tests/test_rc1_3_3_lite.py -q --tb=short

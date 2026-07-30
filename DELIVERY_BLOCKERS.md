@@ -19,6 +19,8 @@
 
 5. Hotspot pool target is not verified.
    - Required deduplicated usable hotspots: `>= 200`.
+   - Current real Mac refresh: 145 usable topics from 3 responsive providers.
+   - Toutiao official returned 404; NewsNow returned a non-JSON response; several TopHub boards returned no parseable rows.
 
 6. The expected freeze tag is not visible in the remote GitHub refs API.
    - Expected: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`.
