@@ -26,6 +26,7 @@ from modules.license_service import check_license, check_system_time, clock_stat
 from generation.image_budget import calculate_image_budget, image_cost_preview, normalize_image_plan, recommended_word_count
 from modules.app_version import APP_SHORT_NAME, APP_VERSION, BUILD_TIME_UTC, PRODUCT_NAME, diagnostic_info
 from providers.errors import user_facing_error_message
+from providers.registry import ui_presets
 from ui.components import friendly_error, show_progress, stage_label
 from ui.layout import page_header
 from ui.theme import apply as apply_theme
@@ -87,14 +88,7 @@ def user_status(value: object) -> str:
     return USER_STATUS_LABELS.get(str(value or ""), "处理中")
 
 
-PRESETS: dict[str, dict[str, dict[str, Any]]] = {
-    "阿里云百炼": {"text": {"name": "阿里云百炼", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "endpoint": "/chat/completions", "auth_type": "bearer", "model": "qwen-plus"}, "image": {"name": "阿里云百炼", "base_url": "https://dashscope.aliyuncs.com", "endpoint": "/api/v1/services/aigc/multimodal-generation/generation", "auth_type": "bearer", "api_format": "dashscope_native", "model": "qwen-image-2.0-pro", "size": "1024x1024"}},
-    "火山引擎": {"text": {"name": "火山引擎", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "endpoint": "/chat/completions", "auth_type": "bearer", "model": "doubao-seed-1-6-250615"}, "image": {"name": "火山引擎", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "endpoint": "/images/generations", "auth_type": "bearer", "api_format": "openai_compatible", "model": "doubao-seedream-4-0-250828", "size": "1024x1024"}},
-    "智谱 GLM": {"text": {"name": "智谱 GLM", "base_url": "https://open.bigmodel.cn/api/paas/v4", "endpoint": "/chat/completions", "auth_type": "bearer", "model": "glm-4.5"}, "image": {"name": "智谱 GLM", "base_url": "https://open.bigmodel.cn/api/paas/v4", "endpoint": "/images/generations", "auth_type": "bearer", "api_format": "openai_compatible", "model": "cogview-4-250304", "size": "1024x1024"}},
-    "DeepSeek": {"text": {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "endpoint": "/chat/completions", "auth_type": "bearer", "model": "deepseek-chat"}, "image": {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "endpoint": "/images/generations", "auth_type": "bearer", "api_format": "openai_compatible", "model": "image-model", "size": "1024x1024"}},
-    "OpenAI 兼容": {"text": {"name": "OpenAI 兼容", "base_url": "https://api.openai.com/v1", "endpoint": "/chat/completions", "auth_type": "bearer", "model": "gpt-4o-mini"}, "image": {"name": "OpenAI 兼容", "base_url": "https://api.openai.com/v1", "endpoint": "/images/generations", "auth_type": "bearer", "api_format": "openai_compatible", "model": "gpt-image-1", "size": "1024x1024"}},
-    "自定义": {"text": {}, "image": {}},
-}
+PRESETS: dict[str, dict[str, dict[str, Any]]] = ui_presets()
 
 INTERFACE_SOURCES = ["官方服务商", "API中转或自定义"]
 
@@ -2091,3 +2085,4 @@ def render_rc1_app(settings: dict[str, Any], save_settings: Any, service: Any, r
         _settings_page(settings, save_settings, root, restricted=False)
     else:
         _about_page(root)
+

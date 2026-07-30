@@ -10,6 +10,7 @@ from typing import Any
 from modules.app_paths import PROJECT_ROOT, config_dir, ensure_user_data_dirs, settings_path
 from modules.credential_store import delete_secret, load_secret, save_secret
 from generation.image_budget import recommended_word_count
+from providers.registry import default_profile
 
 
 ROOT = PROJECT_ROOT
@@ -18,6 +19,29 @@ SETTINGS_PATH = settings_path()
 EXAMPLE_PATH = ROOT / "config" / "settings.example.json"
 logger = logging.getLogger(__name__)
 
+
+def _default_text_profile() -> dict[str, Any]:
+    profile = default_profile("text").to_runtime_profile()
+    profile.update({
+        "api_key": "",
+        "headers": {},
+        "timeout_seconds": 180,
+        "response_format": "json_object",
+        "enabled": True,
+    })
+    return profile
+
+
+def _default_image_profile() -> dict[str, Any]:
+    profile = default_profile("image").to_runtime_profile()
+    profile.update({
+        "api_key": "",
+        "headers": {},
+        "timeout_seconds": 180,
+        "response_type": "auto",
+        "enabled": True,
+    })
+    return profile
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "app_mode": "production",
@@ -38,34 +62,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "verified_text_endpoint": None,
     "verified_at": None,
     "last_text_model_test_at": None,
-    "text_profile": {
-        "name": "OpenAI-compatible text",
-        "base_url": "https://api.openai.com/v1",
-        "endpoint": "/chat/completions",
-        "api_key": "",
-        "model": "gpt-4o-mini",
-        "auth_type": "bearer",
-        "auth_header": "",
-        "headers": {},
-        "timeout_seconds": 180,
-        "response_format": "json_object",
-        "enabled": True,
-    },
-    "image_profile": {
-        "name": "OpenAI-compatible image",
-        "base_url": "https://api.openai.com/v1",
-        "endpoint": "/images/generations",
-        "api_key": "",
-        "model": "gpt-image-1",
-        "auth_type": "bearer",
-        "auth_header": "",
-        "headers": {},
-        "size": "1536x1024",
-        "api_format": "openai_compatible",
-        "timeout_seconds": 180,
-        "response_type": "auto",
-        "enabled": True,
-    },
+    "text_profile": _default_text_profile(),
+    "image_profile": _default_image_profile(),
 }
 
 
@@ -241,3 +239,4 @@ def _settings_with_runtime_secrets(settings: dict[str, Any], migration_error: bo
     result["credential_migration_error"] = bool(migration_error)
     result["credential_available"] = credential_available
     return result
+
