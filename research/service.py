@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -21,6 +21,22 @@ ORG_SUFFIXES = ("公司", "集团", "政府", "市政府", "委员会", "学校"
 PERSON_SUFFIXES = ("先生", "女士", "市长", "部长", "局长", "总统", "议员")
 OFFICIAL_DOMAIN_WHITELIST = {"mfa.gov.cn", "gov.cn", "gov", "gov.tw", "gov.hk"}
 PAGE_NOISE_RE = re.compile(r"相关推荐|热门推荐|版权声明|作者声明|导航菜单|评论区|其他视频标题|页面底部新闻列表|推荐阅读|猜你喜欢|广告")
+FACT_ACTION_MARKERS = (
+    " announced ",
+    " said ",
+    " reported ",
+    " confirmed ",
+    " released ",
+    "表示",
+    "称",
+    "发布",
+    "公布",
+    "通报",
+    "确认",
+    "回应",
+    "宣布",
+    "披露",
+)
 
 
 def _now() -> str:
@@ -207,7 +223,7 @@ def _split_facts(text: str) -> list[str]:
     result: list[str] = []
     for value in values:
         item = re.sub(r"\s+", " ", value).strip()
-        if len(item) < 12 or PAGE_NOISE_RE.search(item) or BOILERPLATE_RE.search(item) or item.endswith(("？", "")):
+        if len(item) < 12 or PAGE_NOISE_RE.search(item) or BOILERPLATE_RE.search(item):
             continue
         result.append(item)
     return result[:60]
@@ -223,30 +239,31 @@ def _similar_text(left: str, right: str) -> float:
 
 _CONTRADICTORY_WORD_PAIRS = (
     ("缺席", "出席"), ("承认", "否认"), ("上涨", "下跌"), ("增加", "减少"),
-    ("开放", "关闭"), ("通过", "否决"), ("上午", "下午"),
+    ("增长", "下降"), ("开放", "关闭"), ("通过", "否决"), ("上午", "下午"),
 )
 _CONTRADICTORY_RESULT_PAIRS = (("受伤", "无人受伤"), ("死亡", "无人死亡"))
 
 
 def _number_signature(text: str) -> set[str]:
     without_dates = re.sub(r"20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日", "", str(text or ""))
-    return set(re.findall(r"\d+(:\.\d+)(:亿元|万元|万|亿|元|人|%|公里|次|场|项)", without_dates))
+    pattern = re.compile(r"\d+(?:\.\d+)?(?:亿元|万元|万|亿|元|人|%|公里|次|场|项)")
+    return {match.group(0) for match in pattern.finditer(without_dates)}
 
 
 
 
 def _fact_time(text: str) -> str:
-    match = re.search(r"20\d{2}\s*\d{1,2}\s*\d{1,2}|\d{1,2}\s*\d{1,2}|||||", str(text or ""))
+    match = re.search(r"20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|今天|昨日|明日|本周|当日", str(text or ""))
     return match.group(0) if match else ""
 
 
 def _fact_location(text: str) -> str:
-    match = re.search(r"(:|)([一-鿿A-Za-z0-9]{2,20}(:|||||||||||))", str(text or ""))
+    match = re.search(r"([\u4e00-\u9fffA-Za-z0-9]{2,20}(?:省|市|县|区|镇|村|路|街|站|机场|医院|学校|公司|园区|现场))", str(text or ""))
     return match.group(1) if match else ""
 
 
 def _fact_number(text: str) -> str:
-    match = re.search(r"\d+(:\.\d+)(:||||||%||||)", str(text or ""))
+    match = re.search(r"\d+(?:\.\d+)?(?:亿元|万元|万|亿|元|人|%|公里|次|场|项)", str(text or ""))
     return match.group(0) if match else ""
 
 
@@ -271,7 +288,7 @@ def _fact_reliability(record: dict[str, Any]) -> str:
 
 
 def _is_background_fact(text: str) -> bool:
-    return any(token in str(text or "") for token in ("", "", "", "", "", "", "", ""))
+    return any(token in str(text or "") for token in ("背景", "原因", "此前", "曾经", "长期", "近年来", "历史", "相关规定"))
 
 
 def _fact_cards(records: list[dict[str, Any]], sources: list[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
@@ -309,13 +326,13 @@ def _fact_conflicts(left: str, right: str) -> bool:
     for positive, negative in _CONTRADICTORY_WORD_PAIRS:
         if (positive in left_text and negative in right_text) or (negative in left_text and positive in right_text):
             return True
-    left_has, right_has = bool(re.search(r"(<!没)有", left_text)), bool(re.search(r"(<!没)有", right_text))
+    left_has, right_has = bool(re.search(r"(?<!没)有", left_text)), bool(re.search(r"(?<!没)有", right_text))
     left_no, right_no = "没有" in left_text, "没有" in right_text
     if (left_has and right_no) or (right_has and left_no):
         return True
     for result, negated in _CONTRADICTORY_RESULT_PAIRS:
-        left_negated = negated in left_text or bool(re.search(r"(:无|没有|无人)[^。！？；\n]{0,4}" + result, left_text))
-        right_negated = negated in right_text or bool(re.search(r"(:无|没有|无人)[^。！？；\n]{0,4}" + result, right_text))
+        left_negated = negated in left_text or bool(re.search(r"(?:无|没有|无人)[^。！？；\n]{0,4}" + result, left_text))
+        right_negated = negated in right_text or bool(re.search(r"(?:无|没有|无人)[^。！？；\n]{0,4}" + result, right_text))
         if result in left_text and result in right_text and left_negated != right_negated:
             return True
     left_numbers, right_numbers = _number_signature(left_text), _number_signature(right_text)
@@ -339,7 +356,8 @@ def _topic_terms(topic: Any) -> set[str]:
 
 def _topic_entities(topic: Any) -> set[str]:
     text = f"{getattr(topic, 'title', '')} {getattr(topic, 'summary', '')}"
-    entities = set(re.findall(r"[\u4e00-\u9fff]{2,8}(:" + "|".join(map(re.escape, ORG_SUFFIXES + PERSON_SUFFIXES)) + r")", text))
+    suffix_pattern = re.compile(r"[\u4e00-\u9fff]{2,8}(?:" + "|".join(map(re.escape, ORG_SUFFIXES + PERSON_SUFFIXES)) + r")")
+    entities = {match.group(0) for match in suffix_pattern.finditer(text)}
     # Short named entities such as 侯友宜 and company/product names are represented by 2-4 grams.
     for run in re.findall(r"[\u4e00-\u9fff]+", text):
         entities.update(run[index:index + size] for size in (2, 3, 4) for index in range(max(0, len(run) - size + 1)))
@@ -392,7 +410,7 @@ class ResearchService:
             return {"url": url, "fetch_success": False, "error": "URL 格式不正确", "fetched_at": _now()}
         fetched_at = _now()
         try:
-            with create_http_client({"timeout_seconds": 5}) as client:
+            with create_http_client({"timeout_seconds": 8}) as client:
                 response = client.get(url, headers={"User-Agent": "Mozilla/5.0 hotspot-article-agent/rc1.3.2-r2", "Accept": "text/html,application/xhtml+xml"})
                 response.raise_for_status()
             result = extract_page_content(response.text, url, fetched_at=fetched_at)
@@ -405,7 +423,7 @@ class ResearchService:
     @staticmethod
     def _search_html(query: str, endpoint: str, name: str) -> list[str]:
         search_url = endpoint.format(query=quote_plus(query))
-        with create_http_client({"timeout_seconds": 5}) as client:
+        with create_http_client({"timeout_seconds": 8}) as client:
             response = client.get(search_url, headers={"User-Agent": "Mozilla/5.0 hotspot-article-agent/rc1.3.2-r2", "Accept": "text/html,application/xhtml+xml"})
             response.raise_for_status()
         parser = _SearchLinkParser()
@@ -424,7 +442,7 @@ class ResearchService:
         return self._search_html(query or str(getattr(topic, "title", "")), "https://html.duckduckgo.com/html/q={query}", "duckduckgo_html")
 
     def fallback_discoverer(self, topic: Any, query: str | None = None) -> list[str]:
-        return self._search_html(query or str(getattr(topic, "title", "")), "https://www.bing.com/searchq={query}", "bing_html")
+        return self._search_html(query or str(getattr(topic, "title", "")), "https://www.bing.com/search?q={query}", "bing_html")
 
     def discover_with_fallback(self, topic: Any) -> tuple[list[str], list[dict[str, Any]]]:
         query = str(getattr(topic, "title", "") or "").strip()
@@ -606,7 +624,7 @@ class ResearchService:
         return verified[:80], single_source[:80], candidates[:160]
 
     def collect(self, topic: Any, references: Iterable[str] | None = None, supplemental_text: str = "") -> dict[str, Any]:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 60
         self.discovery_evidence = []
         urls: list[str] = [str(getattr(topic, "source_url", "") or "").strip()] if getattr(topic, "source_url", "") else []
         if self.discoverer is not None:
@@ -622,7 +640,7 @@ class ResearchService:
         urls.extend(str(value).strip() for value in references or [] if str(value).strip())
         urls = list(dict.fromkeys(canonical_url(url) for url in urls if url))
         raw_sources: list[dict[str, Any]] = []
-        urls = urls[:6]
+        urls = urls[:8]
         for index, url in enumerate(urls, start=1):
             if time.monotonic() >= deadline:
                 break
@@ -652,6 +670,75 @@ class ResearchService:
             source = {"source_id": _source_id("supplemental", len(raw_sources) + 1), "source_name": "用户补充资料", "title": "用户粘贴资料", "url": "", "published_at": "", "fetched_at": _now(), "summary": supplemental_text.strip()[:1800], "content": supplemental_text.strip(), "source_level": "user_reference", "fetch_success": True, "domain": "user", "publisher_id": "user"}
             source.update(score_source_relevance(topic, source))
             raw_sources.append(source)
+        
+        # ── R1.2.1 补充搜索：hotlist_limited 时尝试搜索补充信息 ──
+        accepted_count = len([s for s in raw_sources if s.get("fetch_success") and s.get("accepted_for_research")])
+        if accepted_count == 0 and getattr(topic, "title", ""):
+            # 最多尝试 3 个补充查询
+            topic_title = str(getattr(topic, "title", "")).strip()
+            # 去掉常见夸张词
+            clean_title = re.sub(r'[？！!？\s]+', '', topic_title)
+            clean_title = re.sub(r'(震惊|突发|刚刚|最新|重磅|紧急|速看|深度|真相|内幕|独家)', '', clean_title)
+            # 构造搜索查询
+            search_queries = [
+                topic_title,
+                re.sub(r'[！？，。、\s]+', ' ', clean_title)[:60].strip(),
+            ]
+            # 提取主要实体
+            entities = re.findall(r'[\u4e00-\u9fff]{2,8}(?:公司|集团|政府|医院|学校|大学|部门|法院)', topic_title)
+            if entities:
+                search_queries.append(f"{entities[0]} 最新")
+            elif ' ' in clean_title or '｜' in clean_title:
+                parts = [p.strip() for p in re.split(r'[ ｜|]', clean_title) if p.strip()]
+                if parts:
+                    search_queries.append(f"{parts[0]} {' '.join(parts[1:2])}".strip())
+            
+            search_queries = list(dict.fromkeys(search_queries))[:3]
+            supplemental_fetched = 0
+            for sq in search_queries:
+                if supplemental_fetched >= 3:
+                    break
+                if time.monotonic() >= deadline:
+                    break
+                try:
+                    # 尝试通过 discoverer 做关键词搜索
+                    if self.discoverer and callable(self.discoverer):
+                        disc_result = self.discoverer(topic, query_override=sq)
+                    else:
+                        disc_result = None
+                    extra_urls = []
+                    if isinstance(disc_result, dict):
+                        extra_urls = disc_result.get("urls") or []
+                    elif isinstance(disc_result, list):
+                        extra_urls = disc_result
+                    for eu in extra_urls:
+                        if supplemental_fetched >= 3:
+                            break
+                        if time.monotonic() >= deadline:
+                            break
+                        eu = str(eu).strip()
+                        if not eu or eu in [s.get("url") for s in raw_sources]:
+                            continue
+                        source = dict(self.fetcher(eu))
+                        source.setdefault("source_id", _source_id(eu, len(raw_sources) + 1))
+                        source.setdefault("source_name", urlparse(eu).netloc or "补充搜索结果")
+                        source.setdefault("title", eu)
+                        source.setdefault("summary", "")
+                        source.setdefault("content", "")
+                        source.setdefault("published_at", "")
+                        source.setdefault("fetched_at", _now())
+                        source.setdefault("canonical_url", canonical_url(eu))
+                        source.setdefault("domain", urlparse(eu).netloc.lower())
+                        source.setdefault("publisher_id", registrable_domain(str(source.get("domain") or "")))
+                        source.setdefault("source_level", "source_page")
+                        source.setdefault("fetch_success", False)
+                        source["supplemental_search"] = True
+                        source.update(score_source_relevance(topic, source))
+                        raw_sources.append(source)
+                        if source.get("fetch_success") and source.get("accepted_for_research"):
+                            supplemental_fetched += 1
+                except Exception:
+                    pass
         sources = self._dedupe_sources(raw_sources)
         for index, source in enumerate(sources, start=1):
             source["source_id"] = source.get("source_id") or _source_id(str(source.get("url") or source.get("title") or index), index)
@@ -661,10 +748,10 @@ class ResearchService:
         disputed_facts = [fact for fact in single_source_facts if fact.get("disputed")]
         usable_facts = [fact for fact in list(facts) + list(single_source_facts) if not fact.get("disputed")]
         all_text = "\n".join(str(source.get("content") or source.get("summary") or "") for source in accepted_sources)
-        timeline = re.findall(r"(:20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|今天|昨日|明日|本周|当日)", all_text)[:30]
-        numbers = re.findall(r"\d+(:\.\d+)(:万|亿|人|元|%|公里|次|场|项)", all_text)[:30]
-        key_people = list(dict.fromkeys(re.findall(r"[\u4e00-\u9fff]{2,8}(:先生|女士|市长|部长|局长|总统|议员)", all_text)))[:20]
-        key_orgs = list(dict.fromkeys(re.findall(r"[\u4e00-\u9fff]{2,12}(:公司|集团|政府|市政府|委员会|学校|医院|协会|大学|部门|会议)", all_text)))[:20]
+        timeline = [match.group(0) for match in re.finditer(r"(?:20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|今天|昨日|明日|本周|当日)", all_text)][:30]
+        numbers = [match.group(0) for match in re.finditer(r"\d+(?:\.\d+)?(?:亿元|万元|万|亿|元|人|%|公里|次|场|项)", all_text)][:30]
+        key_people = list(dict.fromkeys(match.group(0) for match in re.finditer(r"[\u4e00-\u9fff]{2,8}(?:先生|女士|市长|部长|局长|总统|议员)", all_text)))[:20]
+        key_orgs = list(dict.fromkeys(match.group(0) for match in re.finditer(r"[\u4e00-\u9fff]{2,12}(?:公司|集团|政府|市政府|委员会|学校|医院|协会|大学|部门|会议)", all_text)))[:20]
         background = [str(source.get("summary") or "") for source in accepted_sources if source.get("summary")][:5]
         publishers = sorted({str(source.get("publisher_id") or "") for source in accepted_sources if str(source.get("publisher_id") or "") not in {"", "user"}})
         cross_verified = sum(1 for fact in facts if fact.get("verification_type") == "independent_publishers")
@@ -728,3 +815,4 @@ def load_research_bundle(topic_id: str) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
+

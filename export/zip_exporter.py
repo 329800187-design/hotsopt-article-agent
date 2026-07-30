@@ -7,12 +7,12 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from export.docx_exporter import export_article, export_combined
+from export.docx_exporter import export_article, export_combined, ensure_article_ready_for_docx_export
 from modules.security import sanitize_sensitive_data
 
 
 def safe_filename(value: str, fallback: str = "文章", max_length: int = 80) -> str:
-    cleaned = re.sub(r'[<>:"/\\|*\x00-\x1f]', "_", str(value or "")).strip(" .")
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or "")).strip(" .")
     return (cleaned or fallback)[:max_length]
 
 
@@ -31,6 +31,7 @@ def export_zip(folder: Path, output_path: Path) -> Path:
 
 def export_article_bundle(article: dict[str, Any], task_root: Path, output_path: Path) -> Path:
     """Export one user-facing article package without internal task metadata."""
+    ensure_article_ready_for_docx_export(article)
     title = safe_filename(str(article.get("title") or "文章"))
     with tempfile.TemporaryDirectory(prefix="article-export-") as temporary:
         staging = Path(temporary) / title
@@ -48,6 +49,8 @@ def export_article_bundle(article: dict[str, Any], task_root: Path, output_path:
 
 
 def export_batch_bundle(articles: list[tuple[dict[str, Any], Path]], output_path: Path, batch_name: str = "本次创作") -> Path:
+    for article, _ in articles:
+        ensure_article_ready_for_docx_export(article)
     with tempfile.TemporaryDirectory(prefix="batch-export-") as temporary:
         staging = Path(temporary) / safe_filename(batch_name, "本次创作")
         staging.mkdir(parents=True, exist_ok=True)

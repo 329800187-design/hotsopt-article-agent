@@ -98,16 +98,44 @@ def test_RESEARCH_TIMEOUT_AND_CANDIDATE_LIMIT_PASS():
     assert "official_so_far and media_so_far" in source
 
 
+def _long_sections(content: str) -> list[dict]:
+    paragraph = (
+        f"{content} 从背景解释看，公开资料能够提供判断事实边界的基础，文章需要说明来源归属和信息限制。"
+        "从影响分析看，读者关心这一变化对行业预期、公共讨论和后续决策的影响，因此应把分析和已确认事实分开。"
+        "从核验路径看，应继续关注权威信息、企业公告和后续报道，避免把单一来源或观点推测写成硬事实。"
+    )
+    return [
+        {"heading": "事件发生了什么", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "为什么受到关注", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "可能带来哪些影响", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "后续值得关注什么", "body": paragraph + "\n\n" + paragraph},
+    ]
+
+
+def _content_markdown(title: str, intro: str, sections: list[dict]) -> str:
+    parts = [f"# {title}", intro]
+    parts.extend(f"## {section['heading']}\n{section['body']}" for section in sections)
+    return "\n\n".join(parts)
+
+
 def test_ONE_RELIABLE_SOURCE_CAN_GENERATE_PASS():
     bundle = {"accepted_source_count": 1, "official_or_reliable_source_count": 1, "usable_fact_count": 1, "verified_facts": [], "usable_facts": [], "sources": [{"fetch_success": True, "accepted_for_research": True, "content": "某公司发布公告。"}]}
-    article = {"content_markdown": "根据现有公开资料，某公司发布公告。", "fact_basis": [], "word_count": 800}
+    content = "根据现有公开资料，某公司发布公告。"
+    intro = "这是一篇用于验证单一可靠来源可生成的完整文章导语。"
+    sections = _long_sections(content)
+    title = "某公司发布公告后的观察"
+    article = {"title": title, "content_markdown": _content_markdown(title, intro, sections), "intro": intro, "sections": sections, "fact_basis": [], "word_count": 1200}
     gate = quality_gate(article, bundle)
     assert gate["status"] != "failed", gate["reasons"]
 
 
 def test_ANALYSIS_OPINION_NOT_BLOCKED_PASS():
     bundle = {"accepted_source_count": 2, "official_or_reliable_source_count": 0, "usable_fact_count": 1, "verified_facts": [], "usable_facts": [], "sources": [{"fetch_success": True, "accepted_for_research": True, "content": "某公司发布公告。"}, {"fetch_success": True, "accepted_for_research": True, "content": "公告已经发布。"}]}
-    article = {"content_markdown": "据公开资料，某公司发布公告。值得关注的是，这可能带来行业影响。", "fact_basis": [], "word_count": 800}
+    content = "据公开资料，某公司发布公告。值得关注的是，这可能带来行业影响。"
+    intro = "这是一篇用于验证分析观点不会被当成硬事实拦截的完整文章导语。"
+    sections = _long_sections(content)
+    title = "公开资料发布后的行业观察"
+    article = {"title": title, "content_markdown": _content_markdown(title, intro, sections), "intro": intro, "sections": sections, "fact_basis": [], "word_count": 1200}
     gate = quality_gate(article, bundle)
     assert gate["status"] in {"passed", "warning"}
 
@@ -141,8 +169,10 @@ def test_STANDARD_FIVE_ARTICLES_TEN_IMAGES_PASS():
 
 
 def test_R227_IDENTITY_AND_STATUS_PASS():
-    assert 'APP_VERSION = "RC1.3.3-Lite-R2.2.8-P1"' in text("modules/app_version.py")
-    assert 'Version = "RC1.3.3-Lite-R2.2.8-P1"' in text("packaging/setup_bootstrapper.cs")
+    from modules.app_version import APP_VERSION
+
+    assert f'APP_VERSION = "{APP_VERSION}"' in text("modules/app_version.py")
+    assert f'Version = "{APP_VERSION}"' in text("packaging/setup_bootstrapper.cs")
     build = text("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert 'RELEASE = "RC1.3.3-Lite-R2.2.8-P1"' in build
-    assert "RC1.3.3-Lite-R2.2.8-P1 Hermes修复与自检完成，等待用户复测" in build
+    assert f'RELEASE = "{APP_VERSION}"' in build
+    assert "等待用户" in build

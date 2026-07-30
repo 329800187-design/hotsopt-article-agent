@@ -167,7 +167,7 @@ def test_ARTICLE_PROMPT_USES_FACT_CARDS_PASS():
     assert "SOURCE_SUMMARY_SHOULD_NOT_BE_IN_PROMPT" not in prompt
     assert "ANOTHER_SUMMARY_SENTINEL" not in prompt
     assert "关键事实卡" in prompt
-    assert "约 1200 个中文汉字" in prompt
+    assert ("1200" in prompt and "1400" in prompt) or ("1500" in prompt and "1700" in prompt) or ("1600" in prompt and "1800" in prompt), f"prompt missing target range: ...{prompt[-200:]}"
 
 
 def test_SOURCE_OVERLAP_LOCAL_CHECK_PASS(monkeypatch: pytest.MonkeyPatch):
@@ -192,9 +192,12 @@ def test_SOURCE_OVERLAP_LOCAL_CHECK_PASS(monkeypatch: pytest.MonkeyPatch):
     assert report["violations"]
 
 
-def test_ONE_AUTOMATIC_TEXT_CALL_PER_ARTICLE_PASS():
-    stats = _init_generation_stats({"text_generation_limit": 1})
-    _register_text_generation_call(stats, "full_article")
+def test_ONE_AUTOMATIC_REWRITE_CALL_PER_ARTICLE_PASS():
+    stats = _init_generation_stats({})
+    _register_text_generation_call(stats, "INITIAL_GENERATION")
+    _register_text_generation_call(stats, "INVALID_OUTPUT_RECOVERY")
+    _register_text_generation_call(stats, "CONTENT_TOO_SHORT_REWRITE")
+    assert stats["text_generation_calls"] == 3
     with pytest.raises(ProviderError):
         _register_text_generation_call(stats, "source_overlap_rewrite")
 
@@ -253,15 +256,17 @@ def test_SOURCE_OVERLAP_NO_AUTO_REWRITE_PASS(monkeypatch: pytest.MonkeyPatch, tm
     assert calls["count"] == 1
 
 
-def test_WORD_SOURCE_SECTION_PASS(tmp_path: Path):
+def test_WORD_OMITS_SOURCE_AND_AI_SECTIONS_PASS(tmp_path: Path):
     body = "这是一段用于 Word 导出的正文内容，能够稳定通过段落检查并保留来源格式。" * 30
     article = _article("Word 导出测试", body)
     output = export_article(article, tmp_path / "hf4.docx")
     document = Document(output)
     paragraphs = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
+    all_text = "\n".join(paragraphs)
     assert paragraphs[0] == "Word 导出测试"
-    assert "资料来源" in paragraphs
-    assert any("原文链接：" in item for item in paragraphs)
+    assert "资料来源" not in paragraphs
+    assert "原文链接：" not in all_text
+    assert "AI辅助声明" not in all_text
 
 
 def test_THREE_SECTION_THREE_PARAGRAPH_LAYOUT_PASS():

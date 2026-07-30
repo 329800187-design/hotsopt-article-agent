@@ -410,8 +410,10 @@ def test_hf2_2_source_guards_are_present():
 
     assert "plan_inline_image_assets(article, style, 2, 4)" not in inline_source
     assert "exact_count=inline_count" in selected_source
-    assert "set_approved_image_budget(state, int(execution_image_plan.get(\"max_calls\") or 0))" in single_task_source
-    assert "重试失败图片" not in ui_source
-    assert "重新生成全部正文图片" not in ui_source
+    assert "requested_image_plan[\"max_calls\"] = calculate_image_budget(1, requested_image_mode)" in single_task_source
+    assert "set_approved_image_budget(state, approved_calls)" in single_task_source
+    assert "pending_image_confirmation" in single_task_source
+    assert "\u91cd\u8bd5\u5931\u8d25\u56fe\u7247" in ui_source
+    assert "\u91cd\u65b0\u751f\u6210\u5168\u90e8\u6b63\u6587\u56fe\u7247" in ui_source
     assert "rc132_image_test_inflight" in ui_source
     assert "TEXT_MODEL_NOT_VERIFIED" in ui_source

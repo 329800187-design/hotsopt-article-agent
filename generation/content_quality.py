@@ -4,25 +4,43 @@ import re
 from collections import Counter
 from typing import Any
 
+from generation.image_budget import count_body_chinese_chars
 from modules.source_formatter import normalize_source_list
 
 
 VAGUE_PATTERNS = ("目前无法确认", "现有信息没有说明", "尚不能判断", "需要等待后续信息", "不宜扩大解读")
-TIME_RE = re.compile(r"(:20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|今天|昨日|明日|本周|当日)")
-NUMBER_RE = re.compile(r"\d+(:\.\d+)(:万|亿|人|元|%|公里|次|场|项)")
-CONCRETE_CLAIM_RE = re.compile(
-    r"(:\d+(:\.\d+)(:万|亿|亿元|万元|元|人|%|公里|次|场|项)|"
-    r"20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|"
-    r"(:辞职|逮捕|关闭|发布|上涨|下跌|增加|减少|缺席|出席|被判|判处|处罚|罚款|死亡|去世|受伤|入院|损失|投入))"
+
+# ── R1.2.1 空话检测词表 ──
+UNKNOWN_PHRASES = (
+    "尚未确认", "仍待核实", "公开信息有限", "无法判断", "不能判断",
+    "等待权威", "暂无资料", "未提供", "仍需等待", "后续关注",
+    "有待观察", "目前尚不", "还没有更多", "仍不清楚", "不得而知",
+    "尚不明确", "正在核实", "信息有限",
 )
-EXPLICIT_NONFACT_RE = re.compile(r"(:\[\s*(:analysis|unknown|disputed)\s*\]|(:analysis|unknown|disputed)\s*[:：]|分析\s*[:：]|未知\s*[:：]|争议\s*[:：])", re.I)
+VALUE_SECTION_MARKERS = {
+    "核验路径": ("核验", "查证", "验证", "核实", "鉴定"),
+    "传播风险": ("风险", "误读", "谣言", "误导", "虚假"),
+    "背景解释": ("背景", "原因", "起因", "来龙去脉", "前因"),
+    "同类案例": ("案例", "类似", "此前", "过去", "参考"),
+    "普通读者启示": ("普通人", "读者", "启示", "启发", "教训", "提醒"),
+    "影响分析": ("影响", "后果", "波及", "连锁", "效应"),
+    "明确观点": ("我认为", "这说明", "意味着", "可以看出", "退一步说", "问题是"),
+}
+TIME_RE = re.compile(r"(?:20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|今天|昨日|明日|本周|当日)")
+NUMBER_RE = re.compile(r"\d+(?:\.\d+)?(?:亿元|万元|万|亿|元|人|%|公里|次|场|项)")
+CONCRETE_CLAIM_RE = re.compile(
+    r"(?:\d+(?:\.\d+)?(?:亿元|万元|万|亿|元|人|%|公里|次|场|项)|"
+    r"20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|"
+    r"(?:辞职|逮捕|关闭|发布(?!主体|渠道|平台|节奏|日期|时间|前)|上涨|下跌|增加|减少|缺席|出席|被判|判处|处罚|罚款|死亡|去世|受伤|入院|损失))"
+)
+EXPLICIT_NONFACT_RE = re.compile(r"(?:\[\s*(?:analysis|unknown|disputed)\s*\]|(?:analysis|unknown|disputed)\s*[:：]|分析\s*[:：]|未知\s*[:：]|争议\s*[:：])", re.I)
 CLAUSE_SPLIT_RE = re.compile(r"[，,；;、]+|并且|同时|此外|导致|造成|因此|且|并")
 HARD_FACT_WARNING_RE = CONCRETE_CLAIM_RE
-SOFT_ANALYSIS_RE = re.compile(r"(:可能|值得关注|从现有资料看|这意味着|趋势|影响|观点|分析|或许|有待观察|后续|折射|显示出|提醒)")
+SOFT_ANALYSIS_RE = re.compile(r"(?:可能|值得关注|从现有资料看|这意味着|趋势|影响|观点|分析|或许|有待观察|后续|折射|显示出|提醒)")
 SOURCE_SECTION_TITLES = {"资料来源", "参考资料", "信息来源", "来源列表"}
-SOURCE_REF_LINE_RE = re.compile(r"^\s*(:\[\s*\d+\s*\]|\d+\s*[.．、])\s*.+")
+SOURCE_REF_LINE_RE = re.compile(r"^\s*(?:\[\s*\d+\s*\]|\d+\s*[.．、])\s*.+")
 URL_RE = re.compile(r"https://|www\.", re.I)
-PUBLISHED_AT_ONLY_RE = re.compile(r"^\s*(:发布时间|发布日期|来源时间)\s*[:：]\s*(:20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日|\d{1,2}月\d{1,2}日)(:\s+\d{1,2}:\d{2}(::\d{2}))\s*$")
+PUBLISHED_AT_ONLY_RE = re.compile(r"^\s*(?:发布时间|发布日期|来源时间)\s*[:：]\s*(?:20\d{2}[-/年]\d{1,2}[-/月]\d{1,2}日|\d{1,2}月\d{1,2}日)(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*$")
 NEGATION_MARKERS = ("并不存在", "没有发生", "并未", "尚未", "未曾", "没有", "否认", "未", "不", "无")
 POLARITY_ACTIONS = (
     "辞职", "逮捕", "关闭", "发布", "上涨", "下跌", "增加", "减少",
@@ -52,9 +70,13 @@ def _article_body_for_fact_scan(markdown: str) -> str:
     body_lines: list[str] = []
     for raw_line in str(markdown or "").splitlines():
         line = raw_line.strip()
+        if re.match(r"^#{1,6}\s+", line):
+            continue
         heading = re.sub(r"^[#>\-\s]+", "", line).strip().rstrip("：:")
         if heading in SOURCE_SECTION_TITLES:
             break
+        if "AI辅助声明" in line or "AI声明" in line or "免责声明" in line:
+            continue
         if SOURCE_REF_LINE_RE.match(line) or URL_RE.search(line) or PUBLISHED_AT_ONLY_RE.match(line):
             continue
         body_lines.append(raw_line)
@@ -80,10 +102,11 @@ def _fact_supported(fact: str, source_text: str) -> bool:
 
 
 def _number_signature(text: str) -> set[str]:
-    return set(re.findall(
-        r"(:20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|\d+(:\.\d+)(:亿元|万元|万|亿|元|人|%|公里|次|场|项))",
-        str(text or ""),
-    ))
+    pattern = re.compile(
+        r"(?:20\d{2}年\s*\d{1,2}月\s*\d{1,2}日|\d{1,2}月\s*\d{1,2}日|"
+        r"\d+(?:\.\d+)?(?:亿元|万元|万|亿|元|人|%|公里|次|场|项))"
+    )
+    return {match.group(0) for match in pattern.finditer(str(text or ""))}
 
 
 def _action_polarities(text: str) -> dict[str, bool]:
@@ -336,7 +359,8 @@ def analyze_article(article: dict[str, Any], research_bundle: dict[str, Any] | N
     trace = validate_fact_basis(article, bundle) if facts else {"valid": False, "validated_count": 0, "verified_fact_count": 0, "total_count": 0, "source_coverage": 0.0, "cross_verified_count": 0, "duplicate_fact_ids": [], "duplicate_fact_count": 0, "unsupported_concrete_claims": _unsupported_concrete_claims(markdown, _canonical_fact_map(bundle)), "invalid_reasons": ["文章没有返回可追溯的 fact_basis"]}
     source_coverage = float(trace.get("source_coverage") or 0)
     target_word_count = int(article.get("word_count") or 0)
-    actual_word_count = len(re.sub(r"\s+", "", markdown))
+    actual_word_count = count_body_chinese_chars(article)
+    article["body_char_count"] = actual_word_count
     length_ratio = actual_word_count / max(1, target_word_count) if target_word_count else 1.0
     score = min(100.0, round(
         min(30, int(trace.get("validated_count") or 0) * 6)
@@ -355,25 +379,35 @@ def analyze_article(article: dict[str, Any], research_bundle: dict[str, Any] | N
 
 
 def _cleanup_claim_text(text: str, claims: list[str]) -> str:
-    cleaned = str(text or "")
-    for claim in claims:
-        claim_text = str(claim or "").strip()
-        if not claim_text:
+    cleaned = str(text or "").strip()
+    claim_texts = [str(claim or "").strip() for claim in claims if str(claim or "").strip()]
+    if not cleaned or not claim_texts:
+        return cleaned
+    sentences = re.split(r"(?<=[。！？!?；;])", cleaned)
+    kept: list[str] = []
+    for sentence in sentences:
+        item = sentence.strip()
+        if not item:
             continue
-        cleaned = cleaned.replace(claim_text + "。", "")
-        cleaned = cleaned.replace(claim_text + "，", "")
-        cleaned = cleaned.replace(claim_text + "；", "")
-        cleaned = cleaned.replace(claim_text, "")
-    cleaned = re.sub(r"[，,；;]{2,}", "，", cleaned)
+        if any(claim in item or item in claim for claim in claim_texts):
+            continue
+        kept.append(item)
+    cleaned = "".join(kept) if kept else ""
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"[，,、；;]\s*([。！？!?])", r"\1", cleaned)
+    cleaned = re.sub(r"([，,、；;]){2,}", "，", cleaned)
+    cleaned = re.sub(r"^[，,、；;。！？!?]+", "", cleaned)
+    cleaned = re.sub(r"[，,、；;]+$", "", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned.strip(" ，；。\n")
+    return cleaned.strip(" ，,、；;\n")
 
 
 def _rebuild_markdown(article: dict[str, Any]) -> str:
     parts: list[str] = []
     title = str(article.get("title") or "").strip()
-    intro = str(article.get("intro") or "").strip()
+    intro = str(article.get("lead") or article.get("intro") or "").strip()
     if title:
         parts.append(f"# {title}")
     if intro:
@@ -386,12 +420,18 @@ def _rebuild_markdown(article: dict[str, Any]) -> str:
         if not body:
             continue
         parts.append(f"## {heading}\n{body}" if heading else body)
-    source_list = normalize_source_list(article.get("source_list") or [])
-    if source_list:
-        parts.append("资料来源\n" + "\n\n".join(source_list))
-    ai_statement = str(article.get("ai_statement") or "").strip()
-    if ai_statement:
-        parts.append(ai_statement)
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _rebuild_body_markdown(article: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for section in article.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        heading = str(section.get("heading") or "").strip()
+        body = str(section.get("body") or "").strip()
+        if body:
+            parts.append(f"## {heading}\n{body}" if heading else body)
     return "\n\n".join(part for part in parts if part).strip()
 
 
@@ -409,7 +449,12 @@ def sanitize_article_hard_facts(article: dict[str, Any], research_bundle: dict[s
     ]
     if not claims:
         return {"article": cleaned, "removed_claims": [], "trace": trace}
-    cleaned["intro"] = _cleanup_claim_text(str(cleaned.get("intro") or ""), claims) or "当前公开资料较少，建议发布前再次核对关键信息。"
+    cleaned_intro = _cleanup_claim_text(str(cleaned.get("lead") or cleaned.get("intro") or ""), claims)
+    cleaned["intro"] = cleaned_intro
+    cleaned["lead"] = cleaned_intro
+    if not cleaned_intro:
+        cleaned["content_warning_code"] = str(cleaned.get("content_warning_code") or "LEAD_MISSING")
+        cleaned["warning_note"] = str(cleaned.get("warning_note") or "导语经事实清洗后为空，请人工核对文章开头。")
     sections: list[dict[str, Any]] = []
     for section in cleaned.get("sections") or []:
         if not isinstance(section, dict):
@@ -417,17 +462,24 @@ def sanitize_article_hard_facts(article: dict[str, Any], research_bundle: dict[s
         body = _cleanup_claim_text(str(section.get("body") or ""), claims)
         if body:
             sections.append({**section, "body": body})
-    while len(sections) < 3:
-        sections.append(
-            {
-                "heading": ["事件概览", "背景补充", "影响观察"][len(sections)],
-                "body": "基于现有公开资料，相关细节仍需以后续权威信息为准。",
-                "image_brief": "与该段信息相关的现实新闻场景，无文字",
-            }
-        )
     cleaned["sections"] = sections
+    cleaned["body_markdown"] = _rebuild_body_markdown(cleaned)
     cleaned["content_markdown"] = _rebuild_markdown(cleaned)
     return {"article": cleaned, "removed_claims": claims, "trace": trace}
+
+
+def _article_has_minimal_structure(article: dict[str, Any]) -> bool:
+    """Return True when the article has enough structure and content to be exportable
+    even if some quality checks flag hard errors (e.g. body slightly too short)."""
+    intro = str(article.get("intro") or "").strip()
+    sections = [s for s in (article.get("sections") or []) if isinstance(s, dict)]
+    bodies = [str(s.get("body") or "").strip() for s in sections]
+    intro_chars = len(re.findall(r"[\u4e00-\u9fff]", intro))
+    has_intro = intro_chars >= 20
+    nonempty_bodies = [b for b in bodies if re.findall(r"[\u4e00-\u9fff]", b)]
+    has_sections = len(nonempty_bodies) >= 3
+    body_chars = sum(len(re.findall(r"[\u4e00-\u9fff]", b)) for b in nonempty_bodies) + intro_chars
+    return has_intro and has_sections and body_chars >= 400
 
 
 def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None, *, minimum_score: float = 35.0) -> dict[str, Any]:
@@ -460,7 +512,10 @@ def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None
         for item in trace.get("unsupported_concrete_claims") or []
         if str(item).strip() and HARD_FACT_WARNING_RE.search(str(item))
     ]
-    warning_reasons.extend(f"已本地删除缺少来源支撑的硬事实：{claim[:80]}" for claim in unsupported[:5])
+    # hotlist_limited/custom_topic 模式下不过度拦截无来源支撑的claim
+    if limited_research_mode or custom_topic_mode:
+        unsupported = []
+    hard_reasons.extend(f"正文具体陈述缺少来源资料支持：{claim[:80]}" for claim in unsupported[:5])
 
     if metrics["entity_count"] < 1 and accepted_source_count > 0:
         warning_reasons.append("正文中的人物或机构信息较少，建议人工复核表达完整度")
@@ -469,8 +524,124 @@ def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None
     if format_warning:
         warning_reasons.append(format_warning)
 
+    # ── R1.2 新增质量检查 ──
+
+    # 1. 模板腔检查
+    template_phrases = ["从现有信息看", "值得关注", "引发关注", "仍需等待", "具有重要意义", "后续仍需"]
+    template_hits: dict[str, int] = {}
+    total_template_hits = 0
+    for phrase in template_phrases:
+        count = markdown.count(phrase)
+        if count:
+            template_hits[phrase] = count
+            total_template_hits += count
+    if any(count >= 3 for count in template_hits.values()) or total_template_hits >= 8:
+        top_offenders = sorted(template_hits.items(), key=lambda x: -x[1])[:3]
+        offender_desc = "；".join(f'"{phrase}" {count}次' for phrase, count in top_offenders)
+        warning_reasons.append(f"模板套话偏多：{offender_desc}。建议替换为具体表述。")
+
+    # 2. 正文长度检查（用 body_char_count 而非 markdown 全文字数）
+    body_char_count = count_body_chinese_chars(article)
+    article["body_char_count"] = body_char_count
+    metrics["word_count"] = body_char_count
+    target_word_count = int(metrics.get("target_word_count") or article.get("word_count") or 0)
+    metrics["length_ratio"] = round(body_char_count / max(1, target_word_count), 4) if target_word_count else 1.0
+    
+    # ── R1.2.1 动态字数门槛：根据 word_count 区分 ──
+    word_count = int(article.get("word_count") or bundle.get("word_count") or 1200)
+    if word_count >= 1600:
+        fail_threshold = 1400
+        warn_threshold = 1599
+        target_desc = "1400字"
+    elif word_count >= 1500:
+        fail_threshold = 1300
+        warn_threshold = 1499
+        target_desc = "1300字"
+    else:
+        fail_threshold = 1000
+        warn_threshold = 1199
+        target_desc = "1000字"
+    
+    if body_char_count < fail_threshold:
+        hard_reasons.append(f"正文字数不足：{body_char_count} 字（最低要求 {target_desc}，目标 {word_count}字）")
+    elif body_char_count <= warn_threshold:
+        warning_reasons.append(f"正文字数偏低：{body_char_count} 字（目标 {word_count}字，建议 ≥ {word_count} 字）")
+
+    # 3. 段落质量检查
+    body_for_para = _article_body_for_fact_scan(markdown)
+    natural_paragraphs = [p.strip() for p in re.split(r"\n\s*\n+", body_for_para) if p.strip() and len(re.findall(r"[\u4e00-\u9fff]", p)) >= 30]
+    if len(natural_paragraphs) < 4:
+        warning_reasons.append(f"正文自然段不足：仅 {len(natural_paragraphs)} 段（建议 ≥ 4 段）")
+    for i, para in enumerate(natural_paragraphs, 1):
+        para_chars = len(re.findall(r"[\u4e00-\u9fff]", para))
+        if para_chars > 260:
+            warning_reasons.append(f"第 {i} 段过长：{para_chars} 字（建议 ≤ 260 字）")
+    # 小节空正文检查
+    for section in article.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        body = str(section.get("body") or "").strip()
+        if not body or not re.findall(r"[\u4e00-\u9fff]", body):
+            sec_heading = section.get("heading", "未命名")
+            hard_reasons.append(f'小节"{sec_heading}"正文为空')
+
+    # 4. 信息密度检查
+    if accepted_source_count > 0:
+        concrete_elements = re.findall(
+            r"(?:20\d{2}年\d{1,2}月\d{1,2}日|\d{1,2}月\d{1,2}日|[A-Z]\w+(?:公司|集团|大学|医院|部门|委员会|协会|平台|组织|[省市县区]))",
+            body_for_para,
+        )
+        if not concrete_elements:
+            warning_reasons.append("正文缺少具体元素（机构名/时间/地点等），信息密度偏低")
+
+    # ── R1.2.1 空话检测 ──
+    unknown_phrases_found: list[str] = []
+    total_unknown_chars = 0
+    total_body_chars = len(re.findall(r"[\u4e00-\u9fff]", body_for_para))
+    for phrase in UNKNOWN_PHRASES:
+        count = body_for_para.count(phrase)  # 只在正文中检测，不含来源/AI声明
+        if count:
+            unknown_phrases_found.extend([phrase] * count)
+            total_unknown_chars += len(phrase) * count
+    if total_body_chars > 0:
+        unknown_ratio = total_unknown_chars / total_body_chars
+        if unknown_ratio > 0.08:
+            hard_reasons.append(
+                f"空话占比过高：{unknown_ratio:.0%}（'{unknown_phrases_found[0]}'等共{len(unknown_phrases_found)}处）。"
+                f"信息核实困难时请转为'传播核验'或'读者判断路径'写法。"
+            )
+        elif unknown_ratio > 0.04:
+            warning_reasons.append(f"空话偏多：{unknown_ratio:.0%}（'{unknown_phrases_found[0]}'等{len(unknown_phrases_found)}处），建议减少模糊表述")
+
+    # ── R1.2.1 价值段落检测 ──
+    value_hits: set[str] = set()
+    for category, markers in VALUE_SECTION_MARKERS.items():
+        if any(marker in body_for_para for marker in markers):
+            value_hits.add(category)
+    if len(value_hits) < 2:
+        missing_categories = [cat for cat in VALUE_SECTION_MARKERS if cat not in value_hits]
+        hard_reasons.append(
+            f"有价值段落不足：仅检测到{len(value_hits)}类（{', '.join(sorted(value_hits)) if value_hits else '无'}）。"
+            f"文章至少需要2类实质内容（核验路径/传播风险/背景解释/同类案例/读者启示/影响分析/明确观点）。"
+            f"缺少：{', '.join(missing_categories[:3])}"
+        )
+
     hard_reasons = list(dict.fromkeys(hard_reasons))
     warning_reasons = list(dict.fromkeys(warning_reasons))
+
+    # ── R1.2 降级逻辑：文章结构完整、正文存在、无虚假硬事实 → warning ──
+    if hard_reasons and _article_has_minimal_structure(article):
+        degraded = [
+            reason
+            for reason in hard_reasons
+            if reason.startswith("正文字数不足") or ("字数" in reason and "不足" in reason)
+        ]
+        still_hard = [reason for reason in hard_reasons if reason not in degraded]
+        warning_reasons = list(dict.fromkeys(
+            warning_reasons + degraded + [f"已降级（原文可导出）：{reason}" for reason in degraded]
+        ))
+        hard_reasons = still_hard
+
     status = "failed" if hard_reasons else "warning" if warning_reasons else "passed"
     return {
         "passed": status != "failed",

@@ -6,6 +6,7 @@ import copy
 import re
 from typing import Any
 
+from generation.image_budget import count_body_chinese_chars
 from modules.source_formatter import normalize_source_list
 
 TECHNICAL_KEYS = {
@@ -39,6 +40,20 @@ def clean_display_text(value: Any, *, preserve_breaks: bool = False) -> str:
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
     return re.sub(r"\s+", " ", text).strip()
+
+
+def clean_title_text(value: Any) -> str:
+    text = clean_display_text(value)
+    text = re.sub(r"^(?:标题|新标题|文章标题)\s*[:：]\s*", "", text).strip()
+    return text.strip(" \"'“”‘’《》")
+
+
+def clean_lead_text(value: Any, title: str = "") -> str:
+    text = clean_display_text(value)
+    text = re.sub(r"^(?:导语|摘要|引言)\s*[:：]\s*", "", text).strip()
+    if _same_block(text, title):
+        return ""
+    return text.strip(" \"'“”‘’")
 
 
 def _clean_lines(value: Any) -> list[str]:
@@ -97,17 +112,76 @@ def _longest_dense_block(sections: list[dict[str, Any]]) -> int:
     return longest
 
 
+def _body_chinese_char_count(article: dict[str, Any]) -> int:
+    return count_body_chinese_chars(article)
+
+
+def _rebuild_content_markdown(article: dict[str, Any]) -> str:
+    parts: list[str] = []
+    title = str(article.get("title") or "").strip()
+    intro = str(article.get("lead") or article.get("intro") or article.get("subtitle") or "").strip()
+    if title:
+        parts.append(f"# {title}")
+    if intro:
+        parts.append(intro)
+    body = _rebuild_body_markdown(article)
+    if body:
+        parts.append(body)
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _rebuild_body_markdown(article: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for section in article.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        heading = str(section.get("heading") or "").strip()
+        body = str(section.get("body") or "").strip()
+        if not body:
+            continue
+        parts.append(f"## {heading}\n{body}".strip() if heading else body)
+    return "\n\n".join(part for part in parts if part).strip()
+
+
+def _normalized_text(value: Any) -> str:
+    text = re.sub(r"\s+", "", str(value or ""))
+    text = re.sub(r"^#{1,6}", "", text)
+    text = re.sub(r"^(?:标题|新标题|文章标题|导语|摘要|引言)[:：]", "", text)
+    return text.strip("：:。！？!?\"'“”‘’《》")
+
+
+def _same_block(left: Any, right: Any) -> bool:
+    a = _normalized_text(left)
+    b = _normalized_text(right)
+    return bool(a and b and a == b)
+
+
 def prepare_article_layout(article: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(article or {})
-    result["title"] = clean_display_text(result.get("title") or "未命名文章")
-    result["subtitle"] = clean_display_text(result.get("subtitle") or result.get("summary") or result.get("intro") or "")
+    result["title"] = clean_title_text(result.get("title") or "未命名文章")
+    result["subtitle"] = clean_lead_text(result.get("lead") or result.get("intro") or result.get("subtitle") or result.get("summary") or "", result["title"])
     result["intro"] = result["subtitle"]
+    result["lead"] = result["subtitle"]
     sections: list[dict[str, Any]] = []
     for index, section in enumerate(result.get("sections") or [], start=1):
         if not isinstance(section, dict):
             continue
         heading = clean_display_text(section.get("heading") or f"正文 {index}")
-        body = _split_dense_paragraphs(section.get("body") or "")
+        raw_body = _split_dense_paragraphs(section.get("body") or "")
+        blocks = [block.strip() for block in PARAGRAPH_SPLIT_RE.split(raw_body) if block.strip()]
+        filtered: list[str] = []
+        for block in blocks:
+            if _same_block(block, result["title"]) or _same_block(block, result["lead"]):
+                continue
+            cleaned_block = block
+            if result["title"] and cleaned_block.startswith(result["title"]):
+                cleaned_block = cleaned_block[len(result["title"]):].strip()
+            if result["lead"] and cleaned_block.startswith(result["lead"]):
+                cleaned_block = cleaned_block[len(result["lead"]):].strip()
+            cleaned_block = cleaned_block.lstrip("，,。:：；;、 \t")
+            if cleaned_block:
+                filtered.append(cleaned_block)
+        body = "\n\n".join(filtered).strip()
         if not body:
             continue
         item = dict(section)
@@ -121,11 +195,14 @@ def prepare_article_layout(article: dict[str, Any]) -> dict[str, Any]:
         sections.append(item)
     result["sections"] = sections
     result["keywords"] = _clean_lines(result.get("keywords") or result.get("tags") or [])
-    result["source_statement"] = clean_display_text(result.get("source_statement") or "资料来源见文末")
+    result["source_statement"] = clean_display_text(result.get("source_statement") or "")
     result["source_list"] = [item for item in normalize_source_list(result.get("source_list") or []) if item]
     for image in result.get("images") or []:
         if isinstance(image, dict):
             image["caption"] = clean_display_text(image.get("caption") or image.get("purpose") or "")
+    result["body_markdown"] = _rebuild_body_markdown(result)
+    result["content_markdown"] = _rebuild_content_markdown(result)
+    result["body_char_count"] = _body_chinese_char_count(result)
     result["layout_status"] = "passed"
     result["layout_check"] = check_article_product(result)
     if not result["layout_check"]["passed"]:
@@ -151,7 +228,7 @@ def check_article_product(article: dict[str, Any]) -> dict[str, Any]:
     elif len(sections) > 5:
         reasons.append("正文小节超过 5 个")
 
-    for field, value in (("title", article.get("title")), ("subtitle", article.get("subtitle")), ("source_statement", article.get("source_statement"))):
+    for field, value in (("title", article.get("title")), ("subtitle", article.get("subtitle"))):
         text = str(value or "")
         if MARKDOWN_RE.search(text) or JSON_FIELD_RE.search(text):
             reasons.append(f"{field} 含有技术格式残留")

@@ -165,9 +165,9 @@ def test_article_gate_before_image_pass():
 
 
 def test_low_quality_article_zero_image_call_pass():
-    source = (ROOT / "generation" / "single_task.py").read_text(encoding="utf-8")
-    assert '"image_usage": {"generation_calls": 0' in source
-    assert "文章需要优化，暂不生成图片。" in source
+    source = (ROOT / "api.py").read_text(encoding="utf-8")
+    assert "ensure_article_allows_paid_image_generation" in source
+    assert "QUALITY_GATE_FAILED" in source
 
 
 def test_research_bundle_persistence_pass(tmp_path, monkeypatch):

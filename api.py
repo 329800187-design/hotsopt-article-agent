@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import uuid
 import tempfile
 import os
 import base64
 import hmac
 import shutil
+import time
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,21 +16,40 @@ from typing import Any, Literal
 from fastapi import FastAPI, File, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from hot_sources.service import HotTrendService
 from hot_sources.classifier import CATEGORIES
 from modules.config_store import load_settings
-from modules.app_paths import exports_root, model_test_root, research_root, tasks_root
+from modules.app_paths import data_root, exports_root, model_test_root, research_root, tasks_root
+
+# ── API 日志初始化：写入 data_root/logs/api.log ──
+# 桌面环境（desktop_host.py 设置 HOTSPOT_DESKTOP=1）下初始化完整日志；
+# 测试/手动启动时不设置以避免干扰 pytest。
+if os.environ.get("HOTSPOT_DESKTOP") == "1":
+    _log_dir = data_root() / "logs"
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        handlers=[
+            logging.FileHandler(_log_dir / "api.log", encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
+else:
+    logging.getLogger().addHandler(logging.NullHandler())
+_logger = logging.getLogger(__name__)
 from modules.database import get_store
 from modules.security import redact_sensitive_text, sanitize_sensitive_data
 from generation.executor import get_executor
+from generation.image_budget import count_body_chinese_chars, recommended_word_count
 from generation.batch_executor import BatchExecutor, get_batch_executor
 from generation.angle_planner import plan_angles
 from generation.inline_images import get_inline_images
 from generation.selected_images import generate_selected_images
 from generation.editor import discard_article_draft, get_article, restore_article_version, save_article, save_article_draft
-from export.docx_exporter import export_article
+from export.docx_exporter import ARTICLE_NOT_READY_MESSAGE, export_article
 from export.zip_exporter import export_article_bundle, export_batch_bundle, safe_filename
 from export.layout_pipeline import ensure_article_layout, prepare_article_layout
 from generation.recovery import recover_interrupted_tasks
@@ -53,6 +74,17 @@ executor = get_executor()
 batch_executor = get_batch_executor()
 
 EXPORTABLE_ARTICLE_STATUSES = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
+
+# ── R1.2.1 临时防重复（进程内弱幂等，非可靠持久幂等）──
+# 10s内同 client_request_id 返回已有批次。
+# 注意：进程重启后丢失；client_request_id 为分钟级粒度（%Y%m%d%H%M）。
+_BATCH_DEDUP_STORE: dict[str, dict[str, Any]] = {}
+
+def _cleanup_stale_dedup_entries(now_ts: float, max_age: float = 15.0) -> None:
+    """移除超过 max_age 秒的旧幂等记录，防止内存泄漏。"""
+    stale = [k for k, v in _BATCH_DEDUP_STORE.items() if now_ts - float(v.get("_ts") or 0) > max_age]
+    for k in stale:
+        _BATCH_DEDUP_STORE.pop(k, None)
 
 
 @asynccontextmanager
@@ -125,6 +157,11 @@ class GenerationOptions(BaseModel):
     image_unit_price: float | None = Field(default=None, ge=0)
     confirm_paid: bool = Field(default=False, exclude=True)
 
+    @field_validator("word_count", mode="before")
+    @classmethod
+    def _migrate_legacy_word_count(cls, value: Any) -> int:
+        return recommended_word_count(value)
+
 
 class CreateTaskRequest(BaseModel):
     task_name: str = Field(default="未命名热点任务", max_length=100)
@@ -143,6 +180,7 @@ class CreateBatchRequest(BaseModel):
     angles: list[str] | None = Field(default=None, min_length=1, max_length=5)
     generation_options: GenerationOptions = Field(default_factory=GenerationOptions)
     concurrency: int = Field(default=2, ge=1, le=5)
+    client_request_id: str | None = Field(default=None, max_length=64, description="幂等键，同一ID重复提交返回已有批次")
 
 
 class BasketRequest(BaseModel):
@@ -678,6 +716,12 @@ def retry_cover(task_id: str) -> JSONResponse:
     return _run_task_response(task_id, "retry-cover")
 
 
+def ensure_article_allows_paid_image_generation(state: dict[str, Any] | None) -> None:
+    gate = (state or {}).get("quality_gate") or {}
+    if gate.get("status") == "failed" or int(gate.get("hard_error_count") or 0) > 0:
+        raise ProviderError("QUALITY_GATE_FAILED", "article quality gate failed")
+
+
 @app.post("/api/tasks/{task_id}/images/generate")
 def generate_selected_task_images(task_id: str, payload: ImageSelectionRequest | None = None) -> JSONResponse:
     blocked = _license_gate("image_generation")
@@ -693,6 +737,7 @@ def generate_selected_task_images(task_id: str, payload: ImageSelectionRequest |
         state = load_generation_task(task_id)
         if not state or not state.get("article"):
             raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
+        ensure_article_allows_paid_image_generation(state)
         if executor.is_running(task_id):
             raise ProviderError("TASK_ALREADY_RUNNING", "task is already running")
         settings = load_settings()
@@ -875,6 +920,7 @@ def _submit_inline_image_operation(
         state = load_generation_task(task_id)
         if not state or not state.get("article"):
             raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
+        ensure_article_allows_paid_image_generation(state)
         if executor.is_running(task_id):
             raise ProviderError("TASK_ALREADY_RUNNING", "task is already running")
         settings = load_settings()
@@ -1004,20 +1050,51 @@ def restore_article_api(task_id: str, payload: ArticleVersionRequest) -> JSONRes
         return _error("ARTICLE_RESTORE_FAILED", "文章版本恢复失败", str(exc), retryable=True, status_code=400)
 
 
+def _article_body_markdown_for_export(article: dict[str, Any]) -> str:
+    body = str(article.get("body_markdown") or "").strip()
+    if body:
+        return body
+    parts: list[str] = []
+    for section in article.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        value = str(section.get("body") or "").strip()
+        if value:
+            parts.append(value)
+    return "\n\n".join(parts).strip()
+
+
+def _ensure_state_article_ready_for_export(state: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(state, dict):
+        raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
+    if state.get("status") not in EXPORTABLE_ARTICLE_STATUSES or state.get("rewrite_requested"):
+        raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
+    article = state.get("article")
+    if not isinstance(article, dict):
+        raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
+    title = str(article.get("title") or "").strip()
+    body_markdown = _article_body_markdown_for_export(article)
+    body_char_count = int(article.get("body_char_count") or count_body_chinese_chars(article) or 0)
+    gate = state.get("quality_gate") or {}
+    gate_status = str(gate.get("status") or "").strip()
+    hard_error_count = int(gate.get("hard_error_count") or 0)
+    if (
+        not title
+        or not body_markdown
+        or body_char_count <= 0
+        or gate_status in {"", "not_checked", "failed"}
+        or hard_error_count > 0
+    ):
+        raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
+    return article
+
+
 def _article_export(task_id: str, kind: str) -> FileResponse:
     task = store.get_task(task_id)
     if not task:
         raise ProviderError("TASK_NOT_FOUND", "task not found")
     state = load_generation_task(task_id)
-    if not state or not isinstance(state.get("article"), dict):
-        raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
-    if state.get("status") not in EXPORTABLE_ARTICLE_STATUSES or state.get("rewrite_requested"):
-        raise ProviderError("ARTICLE_NOT_FINAL", "article is not final")
-    article = prepare_article_layout(state["article"])
-    if not str(article.get("content_markdown") or "").strip():
-        raise ProviderError("ARTICLE_NOT_AVAILABLE", "article content is missing")
-    if str((state.get("quality_gate") or {}).get("status") or "") == "failed":
-        raise ProviderError("ARTICLE_NOT_FINAL", "article quality gate failed")
+    article = prepare_article_layout(_ensure_state_article_ready_for_export(state))
     if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
         raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
         raise ProviderError("ARTICLE_NOT_FINAL", "内容仍在进行差异检查或自动优化，完成后即可导出。")
@@ -1036,14 +1113,7 @@ def _article_export(task_id: str, kind: str) -> FileResponse:
 
 def _exportable_state_article(task_id: str, *, absolute_image_paths: bool = False) -> tuple[dict[str, Any], Path]:
     state = load_generation_task(task_id) if task_id else None
-    if not state or state.get("status") not in EXPORTABLE_ARTICLE_STATUSES:
-        raise ProviderError("ARTICLE_NOT_FINAL", "article is not final")
-    if str((state.get("quality_gate") or {}).get("status") or "") == "failed":
-        raise ProviderError("ARTICLE_NOT_FINAL", "article quality gate failed")
-    article = state.get("article")
-    if not isinstance(article, dict) or not str(article.get("content_markdown") or "").strip():
-        raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
-    article = prepare_article_layout(article)
+    article = prepare_article_layout(_ensure_state_article_ready_for_export(state))
     if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
         raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
     root = generation_task_dir(task_id)
@@ -1058,7 +1128,7 @@ def export_task_word(task_id: str):
     try:
         return _article_export(task_id, "word")
     except ProviderError as exc:
-        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED"} else 400)
+        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED", "ARTICLE_NOT_READY"} else 400)
     except Exception as exc:
         return _error("WORD_EXPORT_FAILED", "Word 导出失败", str(exc), retryable=True, status_code=400)
 
@@ -1068,7 +1138,7 @@ def export_task_zip(task_id: str):
     try:
         return _article_export(task_id, "zip")
     except ProviderError as exc:
-        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED"} else 400)
+        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED", "ARTICLE_NOT_READY"} else 400)
     except Exception as exc:
         return _error("ZIP_EXPORT_FAILED", "ZIP 导出失败", str(exc), retryable=True, status_code=400)
 
@@ -1097,7 +1167,7 @@ def export_batch_zip(batch_id: str):
         export_batch_bundle(articles, path, str(batch.get("batch_name") or "本次创作"))
         return FileResponse(path, media_type="application/zip", filename=f"{safe_filename(str(batch.get('batch_name') or '本次创作'))}.zip")
     except ProviderError as exc:
-        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code == "BATCH_NOT_FINAL" else 400)
+        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"BATCH_NOT_FINAL", "ARTICLE_NOT_READY"} else 400)
     except Exception as exc:
         return _error("ZIP_EXPORT_FAILED", "ZIP 导出失败", str(exc), retryable=True, status_code=400)
 
@@ -1128,7 +1198,7 @@ def export_batch_word(batch_id: str):
         export_combined(articles, path)
         return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=f"{safe_filename(str(batch.get('batch_name') or '本次创作'))}.docx")
     except ProviderError as exc:
-        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code == "BATCH_NOT_FINAL" else 400)
+        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"BATCH_NOT_FINAL", "ARTICLE_NOT_READY"} else 400)
     except Exception as exc:
         return _error("WORD_EXPORT_FAILED", "Word 导出失败", str(exc), retryable=True, status_code=400)
 
@@ -1143,8 +1213,58 @@ def _batch_error_response(error: ProviderError | Exception, status_code: int = 4
     return _error(code, redact_sensitive_text(detail), detail, retryable=is_retryable_error(code), status_code=status_code)
 
 
+def _write_batch_submit_failure(batch_id: str, error_code: str, safe_message: str) -> None:
+    """将批次提交失败原因写入每个 task 的 generation state 和数据库。
+
+    目标：绝不让失败原因静默消失——要么在数据库/state 里，要么在 api.log 里。
+    """
+    store = batch_executor.store
+    try:
+        batch = store.get_batch(batch_id)
+    except Exception:
+        _logger.exception("_write_batch_submit_failure: get_batch failed batch_id=%s", batch_id)
+        return
+    if not batch:
+        return
+    for item in batch.get("items") or []:
+        task = item.get("task") or {}
+        task_id = str(task.get("task_id") or "")
+        if not task_id:
+            continue
+        try:
+            state = load_generation_task(task_id) or {}
+            current_version = int(state.get("state_version") or 0)
+            state.update({
+                "status": "failed",
+                "stage": "failed",
+                "progress": 0,
+                "failed_step": "batch_submit",
+                "error_code": error_code,
+                "safe_error_message": safe_message,
+                "retryable": True,
+                "state_version": current_version + 1,
+            })
+            save_generation_task(state, expected_version=current_version if current_version else None,
+                                 allow_terminal_recovery=True)
+        except Exception:
+            _logger.exception("_write_batch_submit_failure: task state failed task_id=%s", task_id)
+        try:
+            store.update_task_status(task_id, "failed")
+        except Exception:
+            _logger.exception("_write_batch_submit_failure: update_task_status failed task_id=%s", task_id)
+
+
 @app.post("/api/batches")
 def create_batch(payload: CreateBatchRequest) -> JSONResponse:
+    # ── 临时防重复（进程内弱幂等）──
+    client_req_id = str(payload.client_request_id or "").strip()
+    if client_req_id:
+        import time as _time
+        now_ts = _time.time()
+        _cleanup_stale_dedup_entries(now_ts)
+        cached = _BATCH_DEDUP_STORE.get(client_req_id)
+        if cached and (now_ts - float(cached.get("_ts") or 0)) < 10:
+            return _response(True, {**cached, "dedup": True, "message": "任务已创建，请到我的内容查看"}, None, 200)
     requested_topics = payload.topic_ids or payload.topics or []
     if payload.mode == "single_topic_multi_angle" and len(requested_topics) != 1:
         return _error("TOPIC-SELECT-LIMIT", "单热点生成多篇只能选择1个热点。", None, retryable=False, status_code=400)
@@ -1178,6 +1298,18 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
         else:
             concurrency = max(1, min(3, len(topics)))
         batch = batch_executor.store.create_batch(payload.batch_name, payload.mode, topics, options, concurrency, angle_plans)
+        batch_id = str(batch.get("batch_id") or "")
+        try:
+            batch = batch_executor.start_batch(batch_id) or batch
+        except Exception:
+            _logger.exception("create_batch: start_batch failed batch_id=%s", batch_id)
+            # 把每个 task 的失败原因写回 generation state
+            _write_batch_submit_failure(batch_id, "BATCH_START_FAILED",
+                                        "批次启动失败，请查看 api.log 或稍后重试。")
+            batch = batch_executor.store.refresh_batch(batch_id) or batch
+        # ── 存储幂等记录 ──
+        if client_req_id:
+            _BATCH_DEDUP_STORE[client_req_id] = {**batch, "_ts": time.time()}
         return _response(True, batch, None, 201)
     except Exception as exc:
         return _batch_error_response(exc)
@@ -1186,7 +1318,20 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
 @app.get("/api/batches")
 def list_batches() -> JSONResponse:
     try:
-        items = batch_executor.store.list_batches()
+        items = []
+        for batch in batch_executor.store.list_batches():
+            batch_id = str((batch or {}).get("batch_id") or "")
+            refreshed = batch_executor.store.refresh_batch(batch_id) if batch_id else None
+            if refreshed and str(refreshed.get("status") or "") in {"queued", "running"}:
+                try:
+                    refreshed = batch_executor.start_batch(batch_id) or refreshed
+                except Exception:
+                    _logger.exception("list_batches: start_batch failed batch_id=%s", batch_id)
+                    _write_batch_submit_failure(batch_id, "BATCH_AUTO_START_FAILED",
+                                                "批次自动恢复失败，请查看 api.log 或手动重试。")
+                    refreshed = batch_executor.store.refresh_batch(batch_id) or refreshed
+            if refreshed:
+                items.append(refreshed)
         return _response(True, {"items": items, "count": len(items)})
     except Exception as exc:
         return _batch_error_response(exc, 500)

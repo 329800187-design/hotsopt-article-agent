@@ -166,5 +166,5 @@ def test_topic_observations_keep_history(tmp_path):
     store.save_topics([first])
     store.save_topics([second])
     with store.connect() as connection:
-        count = connection.execute("SELECT COUNT(*) FROM hot_topic_observations WHERE topic_id=", (first.id,)).fetchone()[0]
+        count = connection.execute("SELECT COUNT(*) FROM hot_topic_observations WHERE topic_id=?", (first.id,)).fetchone()[0]
     assert count == 2

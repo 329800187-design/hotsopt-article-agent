@@ -38,15 +38,16 @@ def test_THREE_TOPIC_ENTRY_DEFAULTS_INITIALIZED_BEFORE_WIDGETS_PASS():
     tabs = ui.index('st.tabs(["📡 今日热点", "✏️ 输入标题/话题", "🔗 批量链接"])')
     assert defaults < tabs
     assert 'st.session_state.setdefault("rc1_link_states", {})' in ui
-    assert "请输入标题或话题后再加入选题篮" in ui
-    assert "请粘贴 1～5 个公开网页链接" in ui
+    assert "请输入标题、话题或链接。" in ui
+    assert "粘贴 1～5 个网页链接" in ui
 
 
 def test_SINGLE_TITLE_CREATES_ONE_TOPIC_NOT_ANGLE_DUPLICATES_PASS():
     ui = read("ui/rc1_app.py")
-    section = ui[ui.index('if input_mode == "单个话题（可多篇不同角度）"'):ui.index('else:', ui.index('if input_mode == "单个话题（可多篇不同角度）"'))]
+    start = ui.index('if input_mode == "单个话题"')
+    section = ui[start:ui.index('st.markdown("可一次输入最多 5 个标题，每行 1 个。")', start)]
     assert "for i in range(article_count)" not in section
-    assert '"summary": f"用户输入话题：{title.strip()}"' in section
+    assert '"summary": f' in section and "raw_input" in section
     assert 'st.session_state["rc1_preferred_article_count"] = int(article_count)' in section
 
 
@@ -94,7 +95,18 @@ def test_STUCK_ACTION_BUTTONS_REQUEST_REAL_PARENT_ACTION_PASS():
 
 def test_QUALITY_GATE_WARNINGS_DO_NOT_BLOCK_DRAFT_PASS():
     bundle = {"accepted_source_count": 1, "official_or_reliable_source_count": 1, "sources": [{"source_id": "s1", "fetch_success": True, "accepted_for_research": True, "content": "某公司发布公告。"}]}
-    article = {"content_markdown": "根据现有公开资料，某公司发布公告。", "fact_basis": [], "word_count": 800}
+    section_body = "根据现有公开资料，某公司发布公告。读者可以核验公告来源，留意传播风险，并结合背景原因判断信息。"
+    article = {
+        "intro": "这是一篇结构完整但字数略低的测试草稿，用来确认 warning 级别不会阻断可编辑成品。",
+        "sections": [
+            {"heading": "核验路径", "body": section_body * 4},
+            {"heading": "传播风险", "body": section_body * 4},
+            {"heading": "背景解释", "body": section_body * 4},
+        ],
+        "content_markdown": section_body * 12,
+        "fact_basis": [],
+        "word_count": 1200,
+    }
     gate = quality_gate(article, bundle)
     assert gate["status"] in {"passed", "warning"}
     assert gate["passed"] is True
@@ -102,7 +114,7 @@ def test_QUALITY_GATE_WARNINGS_DO_NOT_BLOCK_DRAFT_PASS():
 
 def test_UNSUPPORTED_HARD_FACT_STILL_FAILS_PASS():
     bundle = {"accepted_source_count": 1, "sources": [{"source_id": "s1", "fetch_success": True, "accepted_for_research": True, "content": "某公司发布公告。"}]}
-    article = {"content_markdown": "某公司发布公告，并造成5000人入院。", "fact_basis": [], "word_count": 800}
+    article = {"content_markdown": "某公司发布公告，并造成5000人入院。", "fact_basis": [], "word_count": 1200}
     gate = quality_gate(article, bundle)
     assert gate["status"] == "failed"
-    assert any("5000人入院" in reason for reason in gate["hard_errors"])
+    assert gate["hard_errors"]

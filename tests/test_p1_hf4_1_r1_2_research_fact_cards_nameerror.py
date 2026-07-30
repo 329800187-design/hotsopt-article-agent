@@ -20,6 +20,30 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+def _batch_payload(title: str) -> dict:
+    return {
+        "batch_name": f"api-test-{title}",
+        "mode": "multi_topic",
+        "topics": [
+            {
+                "id": f"api-{abs(hash(title)) % 100000}",
+                "title": title,
+                "summary": title,
+                "category": "测试",
+                "source": "api-test",
+                "source_name": "API测试",
+                "source_url": "https://example.com/api-test",
+                "hot_value": "100万",
+                "hot_score": 1,
+                "rank": 1,
+            }
+        ],
+        "article_count": 1,
+        "generation_options": {"word_count": 1200, "image_plan_mode": "none"},
+        "concurrency": 1,
+    }
+
+
 # ── Unit tests: research_fact_cards in bundle handling ──────────────────────
 
 def test_fact_cards_missing_from_bundle_is_safe():
@@ -118,12 +142,13 @@ def test_post_batches_returns_201():
     import requests
     resp = requests.post(
         "http://127.0.0.1:18501/api/batches",
-        json={"topic": "测试话题API", "count": 1, "words": 500, "image_mode": "none"},
+        json=_batch_payload("测试话题API"),
         timeout=10,
     )
     assert resp.status_code == 201, f"Expected 201, got {resp.status_code}: {resp.text[:200]}"
     data = resp.json()
-    assert "batch_id" in data or "id" in data
+    payload = data.get("data") if isinstance(data, dict) else {}
+    assert payload and ("batch_id" in payload or "id" in payload)
 
 
 @pytest.mark.api
@@ -133,11 +158,13 @@ def test_post_start_returns_202():
     # Create batch first
     resp = requests.post(
         "http://127.0.0.1:18501/api/batches",
-        json={"topic": "测试话题API-start", "count": 1, "words": 500, "image_mode": "none"},
+        json=_batch_payload("测试话题API-start"),
         timeout=10,
     )
     assert resp.status_code == 201
-    batch_id = resp.json().get("batch_id") or resp.json().get("id")
+    data = resp.json()
+    payload = data.get("data") if isinstance(data, dict) else {}
+    batch_id = payload.get("batch_id") or payload.get("id")
     assert batch_id, f"No batch_id in response: {resp.json()}"
 
     # Start it
@@ -164,7 +191,7 @@ def test_no_nameerror_in_api_batch_creation():
     import requests
     resp = requests.post(
         "http://127.0.0.1:18501/api/batches",
-        json={"topic": "测试无研究资料话题", "count": 1, "words": 500, "image_mode": "none"},
+        json=_batch_payload("测试无研究资料话题"),
         timeout=15,
     )
     # Even if batch creation encounters research, it should not 500 with NameError

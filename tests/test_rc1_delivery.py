@@ -94,6 +94,6 @@ def test_word_export_and_article_zip_are_user_facing(tmp_path):
         assert not any("task.json" in name or "api_key" in name for name in names)
 
 
-@pytest.mark.parametrize("value,expected", [("正常中文标题", "正常中文标题"), ("a:b/cd*e", "a_b_c_d_e"), ("...", "文章")])
+@pytest.mark.parametrize("value,expected", [("正常中文标题", "正常中文标题"), ("a:b/cd*e", "a_b_cd_e"), ("a?b", "a_b"), ("...", "文章")])
 def test_safe_export_filename(value, expected):
     assert safe_filename(value) == expected

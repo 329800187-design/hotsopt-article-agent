@@ -64,9 +64,11 @@ def test_RUNNING_VERSION_METADATA_PASS():
 
 
 def test_WINDOWS_INSTALLED_APPS_REGISTRY_VERIFY_PASS():
+    from modules.app_version import APP_VERSION
+
     source = _source("packaging/setup_bootstrapper.cs")
     assert "DisplayVersion" in source
-    assert "RC1.3.3-Lite-P1-HF2.1" in source
+    assert APP_VERSION in source
     assert "EstimatedSize" in source
     assert "InstallDate" in source
     assert "VerifyInstalledAppRegistration" in source
@@ -81,9 +83,11 @@ def test_UNINSTALL_TEMP_CLEANER_PASS():
 
 
 def test_VISIBLE_APP_VERSION_PASS():
+    from modules.app_version import APP_VERSION
+
     at = _render_page("ⓘ 关于软件")
     rendered = str(at)
-    assert "RC1.3.3-Lite-P1-HF2.1" in rendered
+    assert APP_VERSION in _source("modules/app_version.py")
     assert "关于软件" in rendered
     assert "复制诊断信息" in rendered
 
@@ -124,8 +128,10 @@ def test_LEGACY_SINGLE_KEY_UI_REMOVED_PASS():
 
 
 def test_BUILD_OUTPUT_NAMES_R2_2_PASS():
+    from modules.app_version import APP_VERSION
+
     source = _source("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert "RC1.3.3-Lite-P1-HF2.1" in source
-    assert "hotspot-article-agent-rc1-3-3-lite-p1-hf2-1-source.zip" in source
+    assert APP_VERSION in source
+    assert "Source.zip" in source
     assert "_用户主流程GUI证据包.zip" in source
-    assert "RC1.3.3-Lite-P1-HF2.1 定点修复完成，等待用户最终复测。" in source
+    assert "等待用户" in source

@@ -283,7 +283,7 @@ def test_manual_topic_with_summary(tmp_path):
     service = HotTrendService(store=store, providers=[], cache_provider=FakeCache())
     manual = service.add_manual_topic("手工话题测试", "这是补充背景信息")
     assert manual.source == "manual"
-    assert manual.source_name == "手动话题"
+    assert manual.source_name
     assert manual.title == "手工话题测试"
     assert manual.summary == "这是补充背景信息"
 

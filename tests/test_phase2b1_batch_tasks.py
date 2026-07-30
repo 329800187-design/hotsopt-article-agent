@@ -126,12 +126,12 @@ def test_generation_options_are_copied_without_api_key(tmp_path):
     assert batch["items"][0]["task"]["generation_options"] == batch["generation_options"]
 
 
-def test_start_is_idempotent_and_uses_default_two_workers(tmp_path, monkeypatch):
+def test_start_is_idempotent_and_uses_default_workers(tmp_path, monkeypatch):
     fake_run(monkeypatch)
     store = make_store(tmp_path, 5)
     batch = make_batch(store, 5)
     executor = BatchExecutor(store)
-    assert executor.max_workers == 2
+    assert executor.max_workers == 3
     executor.start_batch(batch["batch_id"])
     executor.start_batch(batch["batch_id"])
     result = wait_for(store, batch["batch_id"], "completed")
@@ -270,7 +270,7 @@ def test_bad_batch_isolated_from_other_batches(tmp_path):
     first = make_batch(store, 1)
     second = store.create_batch("second", "multi_topic", [topics(2)[1].to_dict()], {})
     with store.connect() as connection:
-        connection.execute("UPDATE generation_tasks SET status='broken' WHERE task_id=", (first["items"][0]["task"]["task_id"],))
+        connection.execute("UPDATE generation_tasks SET status='broken' WHERE task_id=?", (first["items"][0]["task"]["task_id"],))
     report = BatchExecutor(store).recover_batches()
     assert any(item["batch_id"] == first["batch_id"] for item in report["recovery_failed"] + report["skipped_batches"] + report["recovered_batches"]) or second["batch_id"]
 

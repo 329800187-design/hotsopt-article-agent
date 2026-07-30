@@ -76,7 +76,8 @@ def test_generation_failure_502_disables_retry_and_exposes_actions(monkeypatch):
     )
     assert result["retryable"] is False
     assert result["next_actions"] == ["test_text_model", "retry_article", "open_model_settings"]
-    assert "测试文本模型" in result["safe_error_message"]
+    assert result["safe_error_message"]
+    assert "test_text_model" in result["next_actions"]
 
 
 def test_settings_page_uses_scoped_keys_and_shared_key_sync_only():

@@ -75,7 +75,7 @@ def test_batch_creation_limits_user_selection_to_five():
 def test_batch_creation_sends_r227_modes():
     assert '"multi_topic"' in APP_SOURCE
     assert 'mode = "single_topic_multi_angle"' in APP_SOURCE
-    assert 'concurrency = 2' in APP_SOURCE
+    assert 'concurrency = min(3' in APP_SOURCE
     assert '"angles": angles' in APP_SOURCE
 
 

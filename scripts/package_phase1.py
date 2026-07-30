@@ -17,10 +17,10 @@ ROOT_DIRS = ["config", "docs", "export", "generation", "hot_sources", "license_a
 SENSITIVE_PATTERNS = {
     "private_key_material": re.compile(r"-----BEGIN (:ENCRYPTED )" + "PRIVATE" + r" KEY-----|-----BEGIN RSA " + "PRIVATE" + r" KEY-----"),
     "openai_key": re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
-    "bearer_token": re.compile(r"\bBearer\s+(!\[REDACTED\])[A-Za-z0-9._~+/=-]{8,}", re.I),
-    "auth_assignment": re.compile(r"\b(:authorization|proxy-authorization|cookie|set-cookie)\b\s*[=:]\s*(:(:Bearer|Basic)\s+)(!\[[A-Z_]+\])[A-Za-z0-9._~+/=@:-]{6,}", re.I),
-    "key_assignment": re.compile(r"(i:\b(:api[_-]key|access_token|refresh_token|client_secret|password|token|secret)\b)\s*[\"']\s*[=:]\s*(:[\"'](!\[[A-Z_]+\])[^\"'\r\n]{6,}[\"']|(:[A-Z][A-Za-z0-9._~+/=@:-]{5,}|(:secret|password|token)[A-Za-z0-9._~+/=@:-]{2,}))"),
-    "proxy_credentials": re.compile(r"https://[^/\s:@]+:[^/\s@]+@", re.I),
+    "bearer_token": re.compile(r"\bBearer\s+(?!\[REDACTED\])[A-Za-z0-9._~+/=-]{8,}", re.I),
+    "auth_assignment": re.compile(r"\b(?:authorization|proxy-authorization|cookie|set-cookie)\b\s*[=:]\s*(?:(?:Bearer|Basic)\s+)?(?!\[REDACTED\])[A-Za-z0-9._~+/=@:-]{6,}", re.I),
+    "key_assignment": re.compile(r"\b(?:api[_-]?key|access_token|refresh_token|client_secret|password|token|secret)\b\s*[=:]\s*[\"']?(?!\[REDACTED\])[A-Za-z0-9._~+/=@:-]{6,}[\"']?", re.I),
+    "proxy_credentials": re.compile(r"https?://[^/\s:@]+:[^/\s@]+@", re.I),
 }
 TEST_FIXTURE_MARKER = re.compile(r"def\s+test_|pytest|test_fixture|example\.invalid|\b(:SECRET|TOKEN|COOKIE|PWD|TOP_SECRET|EMBEDDED_SECRET)\b|fake[-_ ]image", re.I)
 RUNTIME_PARTS = {".venv", "__pycache__", ".pytest_cache", ".pytest-tmp", ".tmp", "logs", "outputs", "data", "build"}

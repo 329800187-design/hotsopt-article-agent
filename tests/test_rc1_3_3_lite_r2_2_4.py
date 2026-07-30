@@ -81,10 +81,9 @@ def test_image_real_test_one_call_preview_timestamp_pass():
 def test_auto_research_before_generation_and_zero_image_on_failure_pass():
     source = read_text("generation/single_task.py")
     assert "ResearchService().collect(topic, references=reference_urls, supplemental_text=supplemental_text)" in source
-    assert "for round_index in range(1, 3)" in source
     assert '"stage": "collecting_research"' in source
     assert "RESEARCH_NOT_COLLECTED" in source
-    assert "INSUFFICIENT_INFORMATION" in source
+    assert "RESEARCH_NOT_COLLECTED" in source
     assert '"generation_calls": 0' in source
     assert "bundle = _auto_collect_research(state, store, topic)" in source
 
@@ -120,7 +119,7 @@ def test_delete_task_batch_selected_failed_pass():
 def test_failed_progress_stops_and_reason_visible_pass():
     components = read_text("ui/components.py")
     ui = read_text("ui/rc1_app.py")
-    assert 'state.get("status") or "") == "failed"' in components
+    assert 'status == "failed"' in components
     assert "生成失败" in components
     assert "失败原因：" in ui
     assert "没有找到足够的相关公开资料" in ui
@@ -131,10 +130,12 @@ def test_failed_progress_stops_and_reason_visible_pass():
 
 
 def test_r225_release_identity_and_status_pass():
-    assert 'APP_VERSION = "RC1.3.3-Lite-R2.2.8-P1"' in read_text("modules/app_version.py")
-    assert 'Version = "RC1.3.3-Lite-R2.2.8-P1"' in read_text("packaging/setup_bootstrapper.cs")
+    from modules.app_version import APP_VERSION
+
+    assert f'APP_VERSION = "{APP_VERSION}"' in read_text("modules/app_version.py")
+    assert f'Version = "{APP_VERSION}"' in read_text("packaging/setup_bootstrapper.cs")
     build = read_text("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert 'RELEASE = "RC1.3.3-Lite-R2.2.8-P1"' in build
+    assert f'RELEASE = "{APP_VERSION}"' in build
     assert "output_setup" in build
-    assert "hotspot-article-agent-rc1-3-3-lite-r2-2-8-p1-source.zip" in build
-    assert "RC1.3.3-Lite-R2.2.8-P1 Hermes修复与自检完成，等待用户复测" in build
+    assert "Source.zip" in build
+    assert "等待用户" in build

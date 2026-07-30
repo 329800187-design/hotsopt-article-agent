@@ -93,8 +93,15 @@ def _cover_items(article: dict[str, Any], cover: dict[str, Any] | None) -> list[
 
 def _image_usage(state: dict[str, Any]) -> dict[str, Any]:
     usage = dict(state.get("image_usage") or {})
+    has_explicit_budget = "approved_image_budget" in state or "approved_budget" in usage
     approved_budget = int(state.get("approved_image_budget") or usage.get("approved_budget") or 0)
     generation_calls = int(state.get("image_generation_calls") or usage.get("generation_calls") or 0)
+    if approved_budget <= 0 and not has_explicit_budget:
+        inline_count = len([item for item in state.get("inline_images") or [] if isinstance(item, dict)])
+        plan_mode = str((state.get("generation_options") or {}).get("image_plan_mode") or "standard")
+        plan = image_plan_for(1200, plan_mode)
+        approved_budget = max(inline_count, int(plan.get("max_calls") or 0), generation_calls)
+        usage["budget_inferred"] = True
     usage["approved_budget"] = max(0, approved_budget)
     usage["generation_calls"] = max(0, generation_calls)
     usage["paid_calls"] = int(usage.get("paid_calls") or 0)
@@ -109,6 +116,7 @@ def _image_usage(state: dict[str, Any]) -> dict[str, Any]:
 def set_approved_image_budget(state: dict[str, Any], approved_budget: int) -> dict[str, Any]:
     usage = _image_usage(state)
     usage["approved_budget"] = max(0, int(approved_budget))
+    usage["budget_inferred"] = False
     state["approved_image_budget"] = usage["approved_budget"]
     state["image_usage"] = usage
     return state
@@ -119,10 +127,15 @@ def reserve_image_generation_call(state: dict[str, Any], *, retry_call: bool = F
     approved_budget = int(usage.get("approved_budget") or 0)
     generation_calls = int(usage.get("generation_calls") or 0)
     if generation_calls >= approved_budget:
-        usage["budget_exceeded"] = True
-        state["image_usage"] = usage
-        state["error_code"] = "IMAGE_BUDGET_EXCEEDED"
-        raise ProviderError("IMAGE_BUDGET_EXCEEDED", "image generation budget has already reached the approved limit")
+        if usage.get("budget_inferred"):
+            approved_budget = generation_calls + 1
+            usage["approved_budget"] = approved_budget
+            state["approved_image_budget"] = approved_budget
+        else:
+            usage["budget_exceeded"] = True
+            state["image_usage"] = usage
+            state["error_code"] = "IMAGE_BUDGET_EXCEEDED"
+            raise ProviderError("IMAGE_BUDGET_EXCEEDED", "image generation budget has already reached the approved limit")
     generation_calls += 1
     usage["generation_calls"] = generation_calls
     usage["paid_calls"] = int(usage.get("paid_calls") or 0) + 1
@@ -291,8 +304,10 @@ def run_inline_images(
         root = _output_root(task_root, output_root)
         style = str((state.get("generation_options") or {}).get("image_style") or "anime editorial news illustration")
         current_assets = [sanitize_sensitive_data(item) for item in state.get("inline_images") or []]
+        has_explicit_plan = "image_plan_mode" in (state.get("generation_options") or {}) or "image_plan_mode" in settings
         requested_mode = str((state.get("generation_options") or {}).get("image_plan_mode") or settings.get("image_plan_mode") or "standard")
-        _normalize_state_images_for_plan(state, requested_mode, root)
+        if has_explicit_plan:
+            _normalize_state_images_for_plan(state, requested_mode, root)
         current_assets = [sanitize_sensitive_data(item) for item in state.get("inline_images") or []]
         if replan or not current_assets:
             current_assets = plan_inline_image_assets(article, style, exact_count=exact_count)
@@ -310,7 +325,7 @@ def run_inline_images(
         targets = _target_assets(current_assets, target_ids, regenerate_all)
         if not targets:
             sync_inline_image_files(state, root)
-            return state
+            return _operation_finish(state, store, root)
         state = _operation_start(state, store, root)
     provider = provider or OpenAIImageProvider(image_profile, network_settings=settings.get("network"))
     target_ids_order = [str(item.get("image_id") or "") for item in targets]

@@ -10,12 +10,14 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
+from generation.image_budget import count_body_chinese_chars
 from export.layout_pipeline import prepare_article_layout
 
 DEFAULT_FONT = "宋体"
 TITLE_FONT = "黑体"
 SUBTITLE_FONT = "楷体"
 SOURCE_FONT = "宋体"
+ARTICLE_NOT_READY_MESSAGE = "文章尚未生成成功，暂时无法导出。请先重试文章生成。"
 
 
 def _set_run_font(run: Any, font_name: str, size: int, *, bold: bool = False, color: str | None = None) -> None:
@@ -76,6 +78,29 @@ def _image_index(article: dict[str, Any]) -> dict[str, dict[str, Any]]:
         for item in article.get("images") or []
         if item.get("role") == "inline" and item.get("paragraph_ref")
     }
+
+
+def _body_markdown_from_sections(article: dict[str, Any]) -> str:
+    if str(article.get("body_markdown") or "").strip():
+        return str(article.get("body_markdown") or "").strip()
+    parts: list[str] = []
+    for section in article.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        body = str(section.get("body") or "").strip()
+        if body:
+            parts.append(body)
+    return "\n\n".join(parts).strip()
+
+
+def ensure_article_ready_for_docx_export(article: dict[str, Any] | None) -> None:
+    if not isinstance(article, dict):
+        raise ValueError(f"ARTICLE_NOT_READY: {ARTICLE_NOT_READY_MESSAGE}")
+    title = str(article.get("title") or "").strip()
+    body_markdown = _body_markdown_from_sections(article)
+    body_char_count = int(article.get("body_char_count") or count_body_chinese_chars(article) or 0)
+    if not title or not body_markdown or body_char_count <= 0:
+        raise ValueError(f"ARTICLE_NOT_READY: {ARTICLE_NOT_READY_MESSAGE}")
 
 
 def _format_body_paragraph(paragraph: Any, *, first_line: bool = True) -> None:
@@ -197,26 +222,10 @@ def _add_article_content(document: Document, article: dict[str, Any], base_dir: 
         paragraph.paragraph_format.first_line_indent = Pt(0)
         _set_paragraph_font(paragraph, DEFAULT_FONT, 11)
 
-    source_heading = document.add_paragraph("资料来源", style="Heading 1")
-    _set_paragraph_font(source_heading, TITLE_FONT, 15, bold=True)
-    sources = article.get("source_list") or []
-    if sources:
-        for source in sources:
-            _add_source_paragraph(document, str(source))
-    else:
-        paragraph = document.add_paragraph(str(article.get("source_statement") or "资料来源待补充"))
-        paragraph.paragraph_format.first_line_indent = Pt(0)
-        _set_paragraph_font(paragraph, SOURCE_FONT, 10)
-
-    ai_text = str(article.get("ai_statement") or "AI辅助声明：本文为公开资料整理稿，发布前请再次核对来源、图片与关键信息。").strip()
-    ai_notice = document.add_paragraph(ai_text)
-    ai_notice.paragraph_format.first_line_indent = Pt(0)
-    ai_notice.paragraph_format.space_before = Pt(10)
-    ai_notice.paragraph_format.space_after = Pt(0)
-    _set_paragraph_font(ai_notice, DEFAULT_FONT, 10, color="666666")
 
 
 def export_article(article: dict[str, Any], output_path: Path, base_dir: Path | None = None) -> Path:
+    ensure_article_ready_for_docx_export(article)
     document = Document()
     _configure(document)
     _add_article_content(document, article, base_dir)
@@ -226,6 +235,8 @@ def export_article(article: dict[str, Any], output_path: Path, base_dir: Path | 
 
 
 def export_combined(articles: list[dict[str, Any]], output_path: Path, base_dir: Path | None = None) -> Path:
+    for article in articles:
+        ensure_article_ready_for_docx_export(article)
     document = Document()
     _configure(document)
     for index, article in enumerate(articles):

@@ -8,6 +8,7 @@ import importlib.metadata as metadata
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -26,6 +27,20 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 import package_phase1
+
+
+REQUIRED_RUNTIME_ENTRIES = (
+    "runtime/python.exe",
+    "runtime/pythonw.exe",
+    "runtime/python311.dll",
+    "runtime/vcruntime140.dll",
+    "runtime/vcruntime140_1.dll",
+    "runtime/DLLs/_socket.pyd",
+    "runtime/DLLs/_ssl.pyd",
+    "runtime/DLLs/_hashlib.pyd",
+    "runtime/DLLs/libcrypto-3-x64.dll",
+    "runtime/DLLs/libssl-3-x64.dll",
+)
 
 
 def sha256(path: Path) -> str:
@@ -108,6 +123,32 @@ def _add_bundled_runtime(entries: dict[str, bytes]) -> None:
         if not path.is_file() or "__pycache__" in path.parts or path.suffix.lower() in {".pyc", ".pyo", ".map"}:
             continue
         entries[f"runtime/Lib/site-packages/{path.relative_to(site_packages).as_posix()}"] = path.read_bytes()
+    _validate_required_runtime_entries(entries)
+
+
+def _validate_required_runtime_entries(entries: dict[str, bytes]) -> None:
+    missing = [name for name in REQUIRED_RUNTIME_ENTRIES if name not in entries]
+    if missing:
+        raise RuntimeError("RUNTIME_PACKAGE_INCOMPLETE: missing " + ", ".join(missing))
+
+
+def _smoke_test_packaged_runtime(windows_zip: Path) -> None:
+    if os.name != "nt":
+        return
+    with tempfile.TemporaryDirectory(prefix="hotspot-runtime-smoke-") as temporary:
+        root = Path(temporary)
+        with zipfile.ZipFile(windows_zip) as archive:
+            required = set(REQUIRED_RUNTIME_ENTRIES)
+            missing = [name for name in required if name not in archive.namelist()]
+            if missing:
+                raise RuntimeError("RUNTIME_ZIP_INCOMPLETE: missing " + ", ".join(sorted(missing)))
+            for name in archive.namelist():
+                if name.startswith("runtime/"):
+                    archive.extract(name, root)
+        pythonw = root / "runtime" / "pythonw.exe"
+        completed = subprocess.run([str(pythonw), "--version"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        if completed.returncode != 0:
+            raise RuntimeError(f"RUNTIME_PYTHONW_SMOKE_FAILED: exit_code={completed.returncode}")
 
 
 def _requirement_name(requirement: str) -> str:
@@ -236,6 +277,7 @@ def build_windows(source_zip: Path, output: Path) -> Path:
 """.encode("utf-8")
     _add_bundled_runtime(entries)
     write_zip(output, entries)
+    _smoke_test_packaged_runtime(output)
     return output
 
 

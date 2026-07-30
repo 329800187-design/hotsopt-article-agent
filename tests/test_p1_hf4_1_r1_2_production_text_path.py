@@ -194,6 +194,54 @@ class TestRequestText:
             assert "api_key" not in str(diag).lower()  # never log key
             assert diag["error_type"] == "success"
 
+    def test_formal_timeout_uses_configured_150(self):
+        provider = OpenAITextProvider(_make_profile(timeout_seconds=150))
+        resp = _mock_response(STANDARD_JSON_BODY)
+        with patch("providers.text_provider.create_http_client") as mock_client:
+            mock_ctx = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_ctx
+            mock_ctx.post.return_value = resp
+            _, diag = provider._request_text(
+                messages=[{"role": "user", "content": "hello"}],
+                temperature=0.3,
+                max_tokens=500,
+                response_format="none",
+            )
+            assert mock_client.call_args[0][0]["timeout_seconds"] == 150
+            assert diag["timeout_seconds"] == 150
+
+    def test_formal_timeout_raises_low_config_to_90(self):
+        provider = OpenAITextProvider(_make_profile(timeout_seconds=30))
+        resp = _mock_response(STANDARD_JSON_BODY)
+        with patch("providers.text_provider.create_http_client") as mock_client:
+            mock_ctx = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_ctx
+            mock_ctx.post.return_value = resp
+            _, diag = provider._request_text(
+                messages=[{"role": "user", "content": "hello"}],
+                temperature=0.3,
+                max_tokens=500,
+                response_format="none",
+            )
+            assert mock_client.call_args[0][0]["timeout_seconds"] == 90
+            assert diag["timeout_seconds"] == 90
+
+    def test_formal_timeout_caps_high_config_to_180(self):
+        provider = OpenAITextProvider(_make_profile(timeout_seconds=300))
+        resp = _mock_response(STANDARD_JSON_BODY)
+        with patch("providers.text_provider.create_http_client") as mock_client:
+            mock_ctx = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_ctx
+            mock_ctx.post.return_value = resp
+            _, diag = provider._request_text(
+                messages=[{"role": "user", "content": "hello"}],
+                temperature=0.3,
+                max_tokens=500,
+                response_format="none",
+            )
+            assert mock_client.call_args[0][0]["timeout_seconds"] == 180
+            assert diag["timeout_seconds"] == 180
+
 
 # ── test 3: generate() uses _request_text ──
 

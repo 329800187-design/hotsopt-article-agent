@@ -21,10 +21,13 @@ SENSITIVE_KEY_NAMES = {
     "client_secret",
     "password",
 }
-_SENSITIVE_KEY_PATTERN = re.compile(r"(:cookie|set[-_]cookie|access[-_]token|refresh[-_]token|proxy[-_]authorization|authorization|api[-_]key|client[-_]secret|token|secret|password)", re.I)
-_URL_CREDENTIAL_PATTERN = re.compile(r"(https://)([^/@\s:]+):([^/@\s]+)@", re.I)
-_AUTH_VALUE_PATTERN = re.compile(r"(i)(\b(:authorization|proxy-authorization|cookie|set-cookie|api[-_]key|token|access[-_]token|refresh[-_]token|secret|client[-_]secret|password)\b\s*[:=]\s*)((:(:bearer|basic)\s+)[^,;\s]+)")
-_BEARER_PATTERN = re.compile(r"(i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+_SENSITIVE_KEY_PATTERN = re.compile(r"(?:cookie|set[-_]cookie|access[-_]token|refresh[-_]token|proxy[-_]authorization|authorization|api[-_]key|client[-_]secret|token|secret|password)", re.I)
+_URL_CREDENTIAL_PATTERN = re.compile(r"(https?://)([^/@\s:]+):([^/@\s]+)@", re.I)
+_AUTH_VALUE_PATTERN = re.compile(
+    r"(\b(?:authorization|proxy-authorization|cookie|set-cookie|api[-_]key|token|access[-_]token|refresh[-_]token|secret|client[-_]secret|password)\b\s*[:=]\s*)(?:bearer\s+|basic\s+)?[^,;\s]+",
+    re.I,
+)
+_BEARER_PATTERN = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I)
 
 
 def _normalized_key(key: Any) -> str:

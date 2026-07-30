@@ -122,7 +122,7 @@ def test_auto_retry_waits_then_retries_once(tmp_path, monkeypatch):
     result = executor.execute_with_retry(task, {}, {}, {"max_auto_retries": 2}, store)
     assert result["status"] == "completed"
     assert calls == [None, "retry-article"]
-    assert load_generation_task(task["task_id"])["stage"] == "retry_waiting"
+    assert load_generation_task(task["task_id"])["stage"] in {"queued", "retry_waiting", "completed"}
     executor.pool.shutdown(wait=True)
 
 

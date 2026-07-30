@@ -45,6 +45,8 @@ class HotTopic:
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "HotTopic":
         data = dict(value)
+        if not data.get("id"):
+            raise ValueError("TOPIC_SNAPSHOT_MISSING_ID")
         data["source_url"] = data.get("source_url", data.pop("url", ""))
         data["captured_at"] = data.get("captured_at", data.pop("collected_at", utc_now()))
         data.setdefault("source_name", data.get("source", "未知来源"))

@@ -10,18 +10,22 @@ from license_admin.signing_identity import SigningIdentityError, load_signing_pr
 
 
 def main() -> None:
+    signing_error: SigningIdentityError | None = None
+    try:
+        load_signing_private_key()
+    except SigningIdentityError as exc:
+        signing_error = exc
+
     root = tk.Tk()
     root.title("离线许可证签发")
     fields: dict[str, tk.Entry] = {}
     status_var = tk.StringVar(value="")
 
-    try:
-        load_signing_private_key()
-    except SigningIdentityError as exc:
+    if signing_error is not None:
         status_var.set(
             "未找到可用签发私钥，工具已启动但暂不能签发。\n"
             f"请将私钥放到：{private_key_path()}\n"
-            f"错误信息：{exc}"
+            f"错误信息：{signing_error}"
         )
 
     labels = (

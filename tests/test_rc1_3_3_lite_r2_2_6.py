@@ -59,7 +59,7 @@ def test_R227_SINGLE_TOPIC_ONE_TO_FIVE_ARTICLES_PASS():
     assert "st.slider" in ui
     assert "min_value=1" in ui
     assert "max_value=5" in ui
-    assert "concurrency = 2" in ui
+    assert "concurrency = min(3, count)" in ui
 
 
 def test_R227_MULTI_ANGLE_IS_ACTIVE_PASS():
@@ -105,8 +105,8 @@ def test_TEXT_ARTICLE_CAPABILITY_TEST_PASS(monkeypatch):
 
 
 def test_TEXT_TIMEOUT_ACTIONABLE_ERROR_PASS():
-    assert "文本模型在{limit}秒内未返回文章" in read_text("generation/single_task.py")
-    assert "仅重试文章" in read_text("generation/single_task.py")
+    assert "正文生成在 {limit} 秒内未返回结果" in read_text("generation/single_task.py")
+    assert "retry_article" in read_text("generation/single_task.py")
     assert "已等待" in read_text("ui/components.py")
     assert "超时上限" in read_text("ui/components.py")
 
@@ -124,7 +124,7 @@ def test_TIMEOUT_NO_AUTOMATIC_RETRY_PASS():
 
 def test_NO_INFINITE_PROGRESS_PASS():
     source = read_text("ui/components.py")
-    assert "正在生成正文……" in source
+    assert "正在生成正文…" in source
     assert "已等待" in source
     assert "当前模型" in source
 
@@ -169,8 +169,34 @@ def _bundle() -> dict:
     return {"accepted_source_count": 1, "usable_fact_count": 3, "official_or_reliable_source_count": 1, "key_organizations": ["公司"], "sources": [{"source_id": "s1", "source_name": "公司公告", "publisher_id": "company.example", "domain": "company.example", "source_level": "official", "fetch_success": True, "accepted_for_research": True, "content": content, "summary": content}], "verified_facts": facts, "usable_facts": facts}
 
 
+def _long_sections(content: str) -> list[dict]:
+    paragraph = (
+        f"{content} 从背景解释看，公司公告提供了判断事实边界的基础，读者应先区分公告确认内容和市场延伸解读。"
+        "从影响分析看，这类信息会影响外部预期、合作方判断和后续传播节奏，因此需要保留清晰来源归属。"
+        "从核验路径看，应继续关注后续公告、经营信息和负责人公开表态，不把未经支持的金额或人事变化写成事实。"
+    )
+    return [
+        {"heading": "事件发生了什么", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "为什么受到关注", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "可能带来哪些影响", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "后续值得关注什么", "body": paragraph + "\n\n" + paragraph},
+    ]
+
+
+def _content_markdown(title: str, intro: str, sections: list[dict]) -> str:
+    parts = [f"# {title}", intro]
+    parts.extend(f"## {section['heading']}\n{section['body']}" for section in sections)
+    return "\n\n".join(parts)
+
+
 def _article(extra: str) -> dict:
-    return {"content_markdown": "据公司公告，公司于2026年7月21日发布公告。公司负责人未辞职。公司正在正常经营。" + extra, "word_count": 0, "fact_basis": [{"fact_id": "f1", "fact": "公司于2026年7月21日发布公告。", "source_ids": ["s1"]}, {"fact_id": "f2", "fact": "公司负责人未辞职。", "source_ids": ["s1"]}, {"fact_id": "f3", "fact": "公司正在正常经营。", "source_ids": ["s1"]}]}
+    base = "据公司公告，公司于2026年7月21日发布公告。公司负责人未辞职。公司正在正常经营。"
+    content = base + extra
+    intro = "这是一篇用于验证硬事实与分析观点边界的完整文章导语。"
+    sections = _long_sections(base)
+    title = "公司公告发布后的事实边界"
+    markdown = _content_markdown(title, intro + extra, sections)
+    return {"title": title, "content_markdown": markdown, "intro": intro + extra, "sections": sections, "word_count": 1200, "fact_basis": [{"fact_id": "f1", "fact": "公司于2026年7月21日发布公告。", "source_ids": ["s1"]}, {"fact_id": "f2", "fact": "公司负责人未辞职。", "source_ids": ["s1"]}, {"fact_id": "f3", "fact": "公司正在正常经营。", "source_ids": ["s1"]}]}
 
 
 def test_HARD_FACT_ERROR_BLOCK_PASS():

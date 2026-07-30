@@ -193,7 +193,8 @@ def test_TEXT_MODEL_NOT_FOUND_MESSAGE_PASS(monkeypatch):
     monkeypatch.setattr(text_provider, "create_http_client", lambda *_args, **_kwargs: httpx.Client(transport=httpx.MockTransport(lambda _request: httpx.Response(404, json={"error": {"code": "model_not_found"}}))))
     body = TestClient(api.app).post("/api/models/text/test", json={"profile": {"api_key": "key", "base_url": "https://mock.local/v1", "model": "missing", "endpoint": "/chat/completions"}}).json()
     assert body["error"]["code"] == "MODEL_NOT_FOUND"
-    assert "未找到该模型" in body["error"]["message"]
+    assert "MODEL_NOT_FOUND" in body["error"]["message"]
+    assert "模型设置" in body["error"]["message"]
 
 
 def test_TEXT_NO_CHANNEL_MESSAGE_PASS(monkeypatch):
@@ -305,10 +306,12 @@ def test_WINDOW_TASKBAR_ICON_PASS():
 
 
 def test_WINDOWS_INSTALLED_APPS_ENTRY_PASS():
+    from modules.app_version import APP_VERSION
+
     source = Path("packaging/setup_bootstrapper.cs").read_text(encoding="utf-8")
     assert "CurrentVersion\\Uninstall" in source
     assert "DisplayVersion" in source
-    assert "RC1.3.3-Lite-P1-HF2.1" in source
+    assert APP_VERSION in source
 
 
 def test_CLOSE_FULL_PROCESS_EXIT_PASS():

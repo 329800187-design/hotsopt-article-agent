@@ -18,14 +18,32 @@ from providers.text_provider import OpenAITextProvider, _headers
 
 
 def article_value() -> dict:
-    return {"title": "真实模型文章标题", "intro": "文章摘要", "sections": [{"heading": "事实", "body": "第一段正文", "image_brief": "新闻现场"}, {"heading": "分析", "body": "第二段正文", "image_brief": "人物思考"}, {"heading": "结论", "body": "第三段正文", "image_brief": "公开信息"}], "content_markdown": "# 真实模型文章标题\n\n文章摘要\n\n## 事实\n第一段正文", "tags": ["热点"], "fact_basis": ["公开来源"], "closing_quote": "保持核实", "keywords": ["热点"], "source_statement": "来源声明", "demo_mode": False}
+    intro = "这是一段用于测试的文章导语，说明事件背景、写作角度和读者需要关注的核心信息，确保结构完整。"
+    body = (
+        "根据现有公开资料，文章需要先交代已经确认的信息，再说明仍待核实的部分。"
+        "读者可以通过来源、时间、主体和具体表述进行交叉核验，避免把片段内容当成完整结论。"
+        "这种写法保留事实边界，也能让后续图片、导出和重试流程在真实文章结构下运行。"
+    )
+    sections = [
+        {"heading": "事实梳理", "body": body * 4, "image_brief": "新闻现场"},
+        {"heading": "影响分析", "body": body * 4, "image_brief": "人物思考"},
+        {"heading": "后续关注", "body": body * 4, "image_brief": "公开信息"},
+    ]
+    markdown = "# 真实模型文章标题\n\n" + intro + "\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections)
+    return {"title": "真实模型文章标题", "intro": intro, "sections": sections, "content_markdown": markdown, "tags": ["热点"], "fact_basis": ["公开来源"], "closing_quote": "保持核实", "keywords": ["热点"], "source_statement": "来源声明", "demo_mode": False}
 
 
 def create_phase2a_task(tmp_path: Path) -> tuple[SQLiteStore, dict]:
     store = SQLiteStore(tmp_path / "db.sqlite")
     topic = HotTopic(id="phase2a-topic", title="阶段二测试热点", summary="测试摘要", source="test", source_name="测试源", source_url="https://example.com/topic")
     store.save_topics([topic])
-    return store, store.create_task("2A 单篇任务", "multi_topic", [topic.to_dict()], 1)
+    return store, store.create_task(
+        "2A 单篇任务",
+        "multi_topic",
+        [topic.to_dict()],
+        1,
+        generation_options={"image_plan_mode": "standard", "image_generation_requested": True},
+    )
 
 
 def profiles() -> tuple[dict, dict]:
@@ -186,7 +204,14 @@ def test_api_task_run_endpoint_returns_queued_state(monkeypatch, tmp_path):
 
     store, task = create_phase2a_task(tmp_path)
     monkeypatch.setattr(api, "store", store)
-    monkeypatch.setattr(api, "load_settings", lambda: {"text_profile": {}, "image_profile": {}, "network": {}})
+    monkeypatch.setattr(api, "load_settings", lambda: {
+        "text_profile": {"model": "text-model", "base_url": "https://example.invalid/v1", "endpoint": "/chat/completions"},
+        "image_profile": {},
+        "network": {},
+        "verified_text_model": "text-model",
+        "verified_text_base_url": "https://example.invalid/v1",
+        "verified_text_endpoint": "/chat/completions",
+    })
     class FakeExecutor:
         def is_running(self, task_id):
             return False

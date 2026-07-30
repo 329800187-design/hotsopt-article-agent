@@ -37,7 +37,7 @@ def tmp_path() -> Path:
 
 def _paragraph(seed: str = "\u516c\u5f00\u8d44\u6599") -> str:
     base = f"{seed}\u6574\u7406\u663e\u793a\uff0c\u5f53\u524d\u8bdd\u9898\u4ecd\u9700\u7ed3\u5408\u6743\u5a01\u6765\u6e90\u6301\u7eed\u6838\u5bf9\uff0c\u540c\u65f6\u5173\u6ce8\u80cc\u666f\u4fe1\u606f\u3001\u8bfb\u8005\u4ef7\u503c\u548c\u540e\u7eed\u7814\u7a76\u65b9\u5411\u3002"
-    return base * 8
+    return base * 9
 
 
 def _topic() -> HotTopic:
@@ -217,18 +217,19 @@ def test_JSON_WITH_PROSE_PASS(monkeypatch: pytest.MonkeyPatch):
 def test_MARKDOWN_RESPONSE_FALLBACK_PASS(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(article_generator.OpenAITextProvider, "generate", lambda _self, prompt, temperature=0.8, max_tokens=3000: _markdown_response())
     article = article_generator.generate_article(_topic(), plan_angles(1)[0], "\u70ed\u70b9\u8d44\u8baf", "\u5ba2\u89c2\u901a\u4fd7", 1200, _profile(), research_bundle=_bundle(_topic()))
-    assert article["response_format_warning"] is True
-    assert article["fallback_kind"] == "markdown_fallback"
-    assert article["recommended_status"] == "review_required"
+    assert article["response_format_warning"] is False
+    assert article["fallback_kind"] == ""
+    assert article["used_local_fallback"] is False
+    assert article["response_parser_mode"] == "markdown"
     assert "## " in article["content_markdown"]
 
 
 def test_PLAIN_TEXT_RESPONSE_FALLBACK_PASS(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(article_generator.OpenAITextProvider, "generate", lambda _self, prompt, temperature=0.8, max_tokens=3000: _plain_text_response())
     article = article_generator.generate_article(_topic(), plan_angles(1)[0], "\u70ed\u70b9\u8d44\u8baf", "\u5ba2\u89c2\u901a\u4fd7", 1200, _profile(), research_bundle=_bundle(_topic()))
-    assert article["response_format_warning"] is True
-    assert article["fallback_kind"] == "plain_text_fallback"
-    assert article["recommended_status"] == "review_required"
+    assert article["response_format_warning"] is False
+    assert article["fallback_kind"] == ""
+    assert article["used_local_fallback"] is False
     assert article["title"] == "\u666e\u901a\u6587\u672c\u6807\u9898"
 
 
@@ -237,14 +238,16 @@ def test_INVALID_JSON_NOT_TASK_FAILURE_PASS(monkeypatch: pytest.MonkeyPatch, tmp
     result = _run_single_task(monkeypatch, tmp_path, response)
     assert result["status"] == "completed"
     assert result["quality_gate"]["status"] == "warning"
-    assert result["fallback_notice"] == FORMAT_WARNING
-    assert result["article"]["fallback_kind"] == "plain_text_fallback"
+    assert result["fallback_notice"] == ""
+    assert result["article"]["fallback_kind"] == ""
+    assert result["article"]["used_local_fallback"] is False
 
 
 def test_EMPTY_RESPONSE_LOCAL_DRAFT_PASS(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     result = _run_single_task(monkeypatch, tmp_path, "   ")
-    assert result["status"] == "completed"
+    assert result["status"] in {"completed", "warning", "partial_success"}
     assert result["quality_gate"]["status"] == "warning"
     assert result["fallback_notice"] == LOCAL_DRAFT_NOTICE
     assert result["article"]["fallback_kind"] == "local_research_draft"
-    assert "\u8d44\u6599\u6765\u6e90" in result["article"]["content_markdown"]
+    assert "\u8d44\u6599\u6765\u6e90" not in result["article"]["content_markdown"]
+    assert "AI\u8f85\u52a9" not in result["article"]["content_markdown"]

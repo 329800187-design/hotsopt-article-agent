@@ -304,6 +304,9 @@ class SQLiteStore:
             raise ValueError("文章数量必须在 1～5 之间")
         if mode == "single_topic_multi_angle" and len(selected_topics) != 1:
             raise ValueError("单热点五角度模式只能选择 1 个话题")
+        for topic in selected_topics:
+            if not isinstance(topic, dict) or not topic.get("id"):
+                raise ValueError("TOPIC_SNAPSHOT_MISSING_ID: topic snapshot missing id")
         now = utc_now()
         task = {"task_id": uuid.uuid4().hex[:12], "task_name": safe_task_name or "未命名热点任务", "mode": mode, "selected_topics": selected_topics, "article_count": article_count, "status": redact_sensitive_text(status), "source_name": redact_sensitive_text("、".join(sorted({str(item.get('source_name') or item.get('source') or '未知来源') for item in selected_topics}))), "generation_options": generation_options, "created_at": now, "updated_at": now}
         self._write(lambda connection: connection.execute("INSERT INTO generation_tasks(task_id,task_name,mode,selected_topics,article_count,status,source_name,generation_options,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", (task["task_id"], task["task_name"], mode, json.dumps(selected_topics, ensure_ascii=False), article_count, task["status"], task["source_name"], json.dumps(generation_options, ensure_ascii=False), now, now)))
@@ -352,6 +355,8 @@ class SQLiteStore:
             for position, (topic, angle) in enumerate(jobs, start=1):
                 task_id = uuid.uuid4().hex[:12]
                 topic_snapshot = sanitize_sensitive_data(topic)
+                if not isinstance(topic_snapshot, dict) or not topic_snapshot.get("id"):
+                    raise ValueError("TOPIC_SNAPSHOT_MISSING_ID: topic snapshot missing id")
                 title = redact_sensitive_text(str(topic_snapshot.get("title") or f"话题 {position}"))
                 angle_id = redact_sensitive_text(str((angle or {}).get("angle_id") or "")) or None
                 angle_name = redact_sensitive_text(str((angle or {}).get("angle_name") or (angle or {}).get("name") or "")) or None
@@ -443,17 +448,26 @@ class SQLiteStore:
             counts = {key: statuses.count(key) for key in ("queued", "running", "completed", "failed", "cancelled", "partial_success")}
             exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
             status = self._summarize_batch_status(statuses)
-            current = connection.execute("SELECT status,started_at,completed_at,state_version,mode,quality_status FROM generation_batches WHERE batch_id=?", (batch_id,)).fetchone()
+            current = connection.execute("SELECT status,started_at,completed_at,state_version,mode,quality_status,total_count FROM generation_batches WHERE batch_id=?", (batch_id,)).fetchone()
             if not current:
                 return
-            quality_status = str(current[5] or ("pending" if current[4] == "single_topic_multi_angle" else "not_applicable"))
+            is_multi_angle = current[4] == "single_topic_multi_angle"
+            requires_quality_check = is_multi_angle and int(current[6] or 0) >= 2
+            quality_status = str(current[5] or ("pending" if is_multi_angle else "not_applicable"))
+            if requires_quality_check and quality_status == "not_applicable":
+                quality_status = "pending"
             final_ready = 0
             if status == "completed":
-                if quality_status == "failed":
+                if requires_quality_check and quality_status in {"pending", "checking", "rewriting"}:
                     status = "running"
+                    completed_at = None
+                elif quality_status == "failed":
+                    status = "failed"
                     completed_at = None
                 else:
                     final_ready = int(any(item in exportable_statuses for item in statuses) and all(item in exportable_statuses or item == "cancelled" for item in statuses))
+                    if requires_quality_check and quality_status not in {"passed", "review_required"}:
+                        final_ready = 0
             started_at = current[1] or (utc_now() if status in {"running", "completed", "failed", "cancelled", "partial_success"} else None)
             completed_at = current[2] or (utc_now() if status in {"completed", "failed", "cancelled", "partial_success"} else None)
             if status == "running":

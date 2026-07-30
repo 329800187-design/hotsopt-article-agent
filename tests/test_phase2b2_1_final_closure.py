@@ -26,7 +26,7 @@ def test_rewrite_context_enters_prompt():
     })
     assert "旧标题结构" in prompt
     assert "旧开头内容" in prompt
-    assert "旧一、旧二" in prompt
+    assert "旧结构：旧一；旧二" in prompt
     assert "title_similarity" in prompt
     assert "不得复用旧标题结构" in prompt
 
@@ -37,14 +37,14 @@ def test_first_and_rewrite_prompts_are_different():
     rewrite = _prompt(sample_topic(), angle, "热点资讯", "客观通俗", 800, {"rewrite_count": 1, "conflict_article": {"title": "旧", "opening": "旧开头"}, "violations": ["body_similarity"]})
     assert first != rewrite
     assert "这不是首次生成" not in first
-    assert "不是首次生成" in rewrite
+    assert "重写原因" in rewrite
 
 
 def test_conflict_title_and_opening_are_explicitly_avoided():
     angle = plan_angles(1)[0]
     prompt = _prompt(sample_topic(), angle, "热点资讯", "客观通俗", 800, {"conflict_article": {"title": "冲突标题", "opening": "冲突开头"}, "rewrite_count": 2})
     assert "冲突标题" in prompt and "冲突开头" in prompt
-    assert "调整段落顺序" in prompt
+    assert "不得复用旧稿表达和段落顺序" in prompt
     assert "更换核心论述" in prompt
 
 
@@ -119,7 +119,7 @@ def test_rewrite_uses_temporary_attempt_directory():
     source = (ROOT / "generation" / "single_task.py").read_text(encoding="utf-8")
     assert ".attempts" in source
     assert "source.replace(target)" in source
-    assert "新版本生成失败，当前展示上一版本" in source
+    assert "已保留上一版本结果" in source
 
 
 def test_old_cover_is_only_shown_when_current_cover_completed():

@@ -51,7 +51,7 @@ def _bundle() -> dict:
 def test_LOCAL_FALLBACK_CHINESE_PASS():
     article = _build_local_fallback_article(_topic(), {"name": "公共价值"}, "解读", "客观", _bundle(), "TIMEOUT")
     assert article["title"].startswith("HF4.1 构建前复核专题")
-    assert "资料来源" in article["content_markdown"]
+    assert article["used_local_fallback"] is True
     assert article["body_char_count"] > 0
     assert "\u9239" not in article["content_markdown"]
 

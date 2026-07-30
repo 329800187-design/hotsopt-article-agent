@@ -307,7 +307,7 @@ def test_manual_topic_basket_and_task_snapshot_are_sanitized(tmp_path):
     task = service.create_task("安全快照任务", "single_topic_multi_angle", [topic.id], 5)
     with store.connect() as connection:
         basket_text = connection.execute("SELECT topics FROM topic_basket").fetchone()[0]
-        task_text = connection.execute("SELECT selected_topics FROM generation_tasks WHERE task_id=", (task["task_id"],)).fetchone()[0]
+        task_text = connection.execute("SELECT selected_topics FROM generation_tasks WHERE task_id=?", (task["task_id"],)).fetchone()[0]
     assert basket and "TOP_SECRET" not in basket_text and "user:password" not in basket_text
     assert "TOP_SECRET" not in task_text and "user:password" not in task_text
 

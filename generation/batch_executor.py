@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import logging
 import threading
 import json
 import hashlib
@@ -19,6 +20,9 @@ from generation.similarity import compare_batch_report
 from generation.inline_images import run_inline_images
 from modules.models import HotTopic
 from research.service import ResearchService
+
+
+_logger = logging.getLogger(__name__)
 
 
 class BatchExecutor:
@@ -200,30 +204,37 @@ class BatchExecutor:
             return bool(future and not future.done()) or self.single_executor.is_running(task_id)
 
     def _submit_item(self, batch_id: str, task_id: str, retry_step: str | None = None) -> Future:
-        with self._lock:
-            if self.is_task_active(task_id):
-                raise RuntimeError("TASK_ALREADY_RUNNING")
-            task = self.store.get_task(task_id)
-            if not task:
-                raise ProviderError("TASK_NOT_FOUND", "task not found")
-            settings = self._settings()
-            text_profile = dict(settings.get("text_profile") or {})
-            image_profile = dict(settings.get("image_profile") or {})
-            state = prepare_generation_state(task, text_profile, image_profile, store=self.store)
-            if state.get("status") == "completed":
-                raise ProviderError("TASK_ALREADY_COMPLETED", "completed task cannot run again")
-            if state.get("status") == "cancelled":
-                raise ProviderError("TASK_CANCELLED", "cancelled task cannot run again")
-            batch_config = self.store.get_batch(batch_id) or {}
-            capacity = 3
-            semaphore = self._semaphores.setdefault(batch_id, threading.BoundedSemaphore(capacity))
-            def run_with_capacity() -> dict[str, Any]:
-                with semaphore:
-                    return self.single_executor.execute_with_retry(task, text_profile, image_profile, settings, self.store, retry_step)
-            future = self.single_executor.submit(task_id, run_with_capacity)
-            self._active[task_id] = future
-            future.add_done_callback(lambda completed: self._forget(task_id, completed, batch_id))
+        _logger.info("_submit_item: 开始提交 batch_id=%s task_id=%s retry_step=%s", batch_id, task_id, retry_step)
+        try:
+            with self._lock:
+                if self.is_task_active(task_id):
+                    raise RuntimeError("TASK_ALREADY_RUNNING")
+                task = self.store.get_task(task_id)
+                if not task:
+                    raise ProviderError("TASK_NOT_FOUND", "task not found")
+                settings = self._settings()
+                text_profile = dict(settings.get("text_profile") or {})
+                image_profile = dict(settings.get("image_profile") or {})
+                state = prepare_generation_state(task, text_profile, image_profile, store=self.store)
+                if state.get("status") == "completed":
+                    raise ProviderError("TASK_ALREADY_COMPLETED", "completed task cannot run again")
+                if state.get("status") == "cancelled":
+                    raise ProviderError("TASK_CANCELLED", "cancelled task cannot run again")
+                batch_config = self.store.get_batch(batch_id) or {}
+                capacity = 3
+                semaphore = self._semaphores.setdefault(batch_id, threading.BoundedSemaphore(capacity))
+                def run_with_capacity() -> dict[str, Any]:
+                    with semaphore:
+                        return self.single_executor.execute_with_retry(task, text_profile, image_profile, settings, self.store, retry_step)
+                future = self.single_executor.submit(task_id, run_with_capacity)
+                self._active[task_id] = future
+                future.add_done_callback(lambda completed: self._forget(task_id, completed, batch_id))
+            _logger.info("_submit_item: 提交成功 batch_id=%s task_id=%s future_done=%s",
+                         batch_id, task_id, future.done())
             return future
+        except Exception:
+            _logger.exception("_submit_item: 提交失败 batch_id=%s task_id=%s", batch_id, task_id)
+            raise
 
     def _ensure_shared_research(self, batch: dict[str, Any]) -> dict[str, Any]:
         if batch.get("mode") != "single_topic_multi_angle":
@@ -248,22 +259,29 @@ class BatchExecutor:
         return self.store.get_batch(str(batch.get("batch_id") or "")) or batch
 
     def _submit_inline_item(self, batch_id: str, task_id: str) -> Future:
-        with self._lock:
-            if self.is_task_active(task_id):
-                raise RuntimeError("TASK_ALREADY_RUNNING")
-            settings = self._settings()
-            future = self.single_executor.submit(
-                task_id,
-                lambda: run_inline_images(
+        _logger.info("_submit_inline_item: 开始提交 batch_id=%s task_id=%s", batch_id, task_id)
+        try:
+            with self._lock:
+                if self.is_task_active(task_id):
+                    raise RuntimeError("TASK_ALREADY_RUNNING")
+                settings = self._settings()
+                future = self.single_executor.submit(
                     task_id,
-                    settings.get("image_profile", {}),
-                    settings=settings,
-                    store=self.store,
-                ),
-            )
-            self._active[task_id] = future
-            future.add_done_callback(lambda completed: self._forget(task_id, completed, batch_id))
+                    lambda: run_inline_images(
+                        task_id,
+                        settings.get("image_profile", {}),
+                        settings=settings,
+                        store=self.store,
+                    ),
+                )
+                self._active[task_id] = future
+                future.add_done_callback(lambda completed: self._forget(task_id, completed, batch_id))
+            _logger.info("_submit_inline_item: 提交成功 batch_id=%s task_id=%s future_done=%s",
+                         batch_id, task_id, future.done())
             return future
+        except Exception:
+            _logger.exception("_submit_inline_item: 提交失败 batch_id=%s task_id=%s", batch_id, task_id)
+            raise
 
     def start_batch(self, batch_id: str) -> dict[str, Any]:
         with self._lock:
@@ -283,8 +301,38 @@ class BatchExecutor:
                 try:
                     self._submit_item(batch_id, task_id)
                 except RuntimeError as exc:
+                    # TASK_ALREADY_RUNNING 是竞态，跳过继续即可
                     if str(exc) != "TASK_ALREADY_RUNNING":
-                        raise
+                        _logger.exception("start_batch: 非预期 RuntimeError task_id=%s", task_id)
+                except Exception as exc:
+                    _logger.exception("start_batch: 提交 item 失败 batch_id=%s task_id=%s", batch_id, task_id)
+                    # 把该 task 标记为失败，然后继续处理下一个 item
+                    try:
+                        corrupt_task_data = isinstance(exc, ValueError) and "TOPIC_SNAPSHOT_MISSING_ID" in str(exc)
+                        state = load_generation_task(task_id) or {
+                            "task_id": task_id,
+                            "task_name": task.get("task_name") or "",
+                            "mode": task.get("mode") or "",
+                            "selected_topics": task.get("selected_topics") or [],
+                            "generation_options": task.get("generation_options") or {},
+                        }
+                        current_version = int(state.get("state_version") or 0)
+                        state.update({
+                            "status": "failed",
+                            "stage": "failed",
+                            "progress": 0,
+                            "failed_step": "batch_submit",
+                            "error_code": "TASK-DATA-CORRUPT" if corrupt_task_data else "TASK_SUBMIT_FAILED",
+                            "safe_error_message": "这条任务的数据已损坏，请删除后重新选择该话题生成。" if corrupt_task_data else "任务提交失败，请查看 api.log 或手动重试。",
+                            "retryable": not corrupt_task_data,
+                            "state_version": current_version + 1,
+                        })
+                        save_generation_task(state, expected_version=current_version if current_version else None,
+                                             allow_terminal_recovery=True)
+                        self.store.update_task_status(task_id, "failed")
+                    except Exception:
+                        _logger.exception("start_batch: 标记失败 task 也失败了 task_id=%s", task_id)
+                # 无论成功失败都继续下一个 item
             return self.store.refresh_batch(batch_id) or batch
 
     def cancel_task(self, batch_id: str, task_id: str) -> dict[str, Any]:

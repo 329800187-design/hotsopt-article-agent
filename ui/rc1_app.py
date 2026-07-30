@@ -305,10 +305,12 @@ def _render_text_generation_status(state: dict[str, Any], task_id: str, restrict
     calls = int(state.get("text_generation_calls") or 0)
     model = str(state.get("text_model_name") or ((state.get("model_info") or {}).get("text") or {}).get("model") or "未命名模型")
     fallback_kind = str(state.get("fallback_kind") or "")
+    used_local_fallback = bool(state.get("used_local_fallback"))
     provider_code = str(state.get("provider_error_code") or state.get("fallback_reason") or "")
     provider_message = str(state.get("provider_error_message") or state.get("fallback_notice") or "")
+    parser_mode = str(state.get("response_parser_mode") or "")
     elapsed = _seconds_between(state.get("text_model_started_at"), state.get("text_model_finished_at"))
-    if fallback_kind:
+    if used_local_fallback:
         st.warning("本篇未使用文本模型正式正文")
         st.caption(f"原因：{provider_code or '模型调用失败'}")
         if provider_message:
@@ -326,6 +328,10 @@ def _render_text_generation_status(state: dict[str, Any], task_id: str, restrict
         st.success("文本模型生成成功")
         st.caption(f"模型：{model}")
         st.caption(f"调用次数：{calls}")
+        if parser_mode:
+            st.caption(f"解析模式：{parser_mode}")
+        if provider_code == "CONTENT_TOO_SHORT" and provider_message:
+            st.warning(provider_message)
         if elapsed:
             st.caption(f"耗时：{elapsed}秒")
 
@@ -853,10 +859,14 @@ def render_start(service: Any) -> None:
         image_calls = calculate_image_budget(total_articles, image_mode)
         image_retry = 0
         text_rewrite = 0
+        
+        # ── R1.2.1 动态字数范围 ──
+        _wc_map = {1200: "1200～1400", 1500: "1500～1700", 1600: "1600～1800"}
+        _body_range = _wc_map.get(word_count, "1200～1400")
 
         st.markdown("#### 📊 调用预算")
         st.metric("预计文章数量", total_articles)
-        st.metric("正文最低字数", "1000 汉字")
+        st.metric("正文目标字数", f"{_body_range} 字")
         st.metric("基础文本调用", f"{text_calls} 次")
         st.metric("预计图片调用", f"{image_calls} 次")
         st.caption(f"自动图片重试：{image_retry} 次 · 自动文本重写：默认{text_rewrite} 次")
@@ -884,8 +894,39 @@ def render_start(service: Any) -> None:
         if not paid_batch_confirmed:
             st.caption("未确认费用前，开始生成不可用。")
 
-    if st.button("🚀 开始生成", type="primary", use_container_width=True, disabled=image_mode != "none" and not paid_batch_confirmed):
+    # ── 提交锁：点击后立即disabled，防止重复提交 ──
+    submitting_key = "rc1_generation_submitting"
+    last_submit_ts_key = "rc1_generation_last_submit_ts"
+    request_id_key = "rc1_generation_client_request_id"
+    last_batch_id_key = "rc1_last_created_batch_id"
+    already_submitting = st.session_state.get(submitting_key)
+    if st.button("🚀 开始生成" if not already_submitting else "⏳ 正在创建任务/正在进入队列…",
+                 type="primary", use_container_width=True,
+                 disabled=already_submitting or (image_mode != "none" and not paid_batch_confirmed),
+                 key="rc1_start_generate"):
+        # 10秒内重复点击防护
+        import hashlib as _hl
+        import time as _time
+        now_ts = _time.time()
+        options_fingerprint = json.dumps({
+            "basket": [str(item["id"]) for item in basket],
+            "mode": mode, "count": count, "word_count": word_count,
+            "article_type": article_type, "style": style,
+        }, sort_keys=True)
+        basket_hash = _hl.md5(options_fingerprint.encode()).hexdigest()[:16]
+        # 同一basket+options 10秒内只创建一次
+        if st.session_state.get(request_id_key, "").startswith(basket_hash):
+            last_ts = st.session_state.get(last_submit_ts_key, 0)
+            if now_ts - last_ts < 10:
+                st.info("任务已创建，请到「我的内容」查看。")
+                batch_id = st.session_state.get(last_batch_id_key)
+                if batch_id:
+                    _navigate_to("📋 我的内容")
+                    st.rerun()
+                return
+        st.session_state[submitting_key] = True
         try:
+            client_request_id = f"{basket_hash}-{datetime.now():%Y%m%d%H%M}"
             batch = _api("POST", "/batches", json={
                 "batch_name": name,
                 "mode": mode,
@@ -893,6 +934,7 @@ def render_start(service: Any) -> None:
                 "article_count": count,
                 "angles": angles,
                 "concurrency": concurrency,
+                "client_request_id": client_request_id,
                 "generation_options": {
                     "article_type": article_type,
                     "style": style,
@@ -906,9 +948,15 @@ def render_start(service: Any) -> None:
                     "confirm_paid": bool(paid_batch_confirmed)
                 }
             })
+            st.session_state[request_id_key] = client_request_id
+            st.session_state[last_submit_ts_key] = now_ts
+            st.session_state[last_batch_id_key] = batch["batch_id"]
             _api("POST", f"/batches/{batch['batch_id']}/start")
             st.success("已开始生成，可在「我的内容」查看进度。")
+            _navigate_to("📋 我的内容")
+            st.rerun()
         except Exception as exc:
+            st.session_state[submitting_key] = False
             _log_error("TASK-CREATE-001", exc, page="开始生成", action="create_batch")
             st.error(f"任务创建失败：{str(exc)[:200]}\n错误码：TASK-CREATE-001")
 
@@ -1203,10 +1251,21 @@ def _content(restricted: bool = False) -> None:
                     article = state.get("article") or {}
                     if article:
                         st.markdown(f"### {article.get('title') or '文章'}")
-                        if article.get("intro") or article.get("summary"):
-                            st.markdown(str(article.get("intro") or article.get("summary") or ""))
+                        if article.get("lead") or article.get("intro") or article.get("summary"):
+                            st.markdown(str(article.get("lead") or article.get("intro") or article.get("summary") or ""))
+                        body_markdown = str(article.get("body_markdown") or "").strip()
+                        if not body_markdown and article.get("sections"):
+                            body_parts: list[str] = []
+                            for section in article.get("sections") or []:
+                                if not isinstance(section, dict):
+                                    continue
+                                heading = str(section.get("heading") or "").strip()
+                                body = str(section.get("body") or "").strip()
+                                if body:
+                                    body_parts.append(f"## {heading}\n{body}".strip() if heading else body)
+                            body_markdown = "\n\n".join(body_parts).strip()
                         with st.expander("查看全文"):
-                            st.markdown(article.get("content_markdown") or "")
+                            st.markdown(body_markdown or article.get("content_markdown") or "")
                         exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
                         layout_ok = (article.get("layout_check") or {}).get("passed", bool(article.get("content_markdown")))
                         if state.get("status") in exportable_statuses and gate.get("status") != "failed" and layout_ok:
@@ -1216,10 +1275,6 @@ def _content(restricted: bool = False) -> None:
                                 _open_export_location()
                         else:
                             st.info("文章尚未通过质量门禁，暂不能作为正式成品导出。")
-                        if article.get("source_list"):
-                            with st.expander("资料来源", expanded=False):
-                                for source_line in article["source_list"]:
-                                    st.markdown(str(source_line))
                         if state.get("status") == "completed" and gate.get("status") in {"passed", "warning"}:
                             st.markdown("#### 文章确认后再生成图片")
                             requested_mode = normalize_image_plan((state.get("generation_options") or {}).get("image_plan_mode"))
@@ -1276,6 +1331,12 @@ def _content(restricted: bool = False) -> None:
                         completed_inline = sum(item.get("status") == "completed" for item in inline_items)
                         failed_inline = sum(item.get("status") == "failed" for item in inline_items)
                         st.caption(f"已完成 {completed_inline}/{len(inline_items)} 张 · 失败 {failed_inline} 张")
+                        if failed_inline and not restricted and st.button("重试失败图片", disabled=not inline_paid_confirmed, key=f"rc1_inline_retry_failed_{task_id}"):
+                            _api("POST", f"/tasks/{task_id}/inline-images/retry-failed", json={"confirm_paid": True})
+                            st.rerun()
+                        if not restricted and st.button("重新生成全部正文图片", disabled=not inline_paid_confirmed, key=f"rc1_inline_regenerate_all_{task_id}"):
+                            _api("POST", f"/tasks/{task_id}/inline-images/regenerate", json={"confirm_paid": True})
+                            st.rerun()
                         image_columns = st.columns(min(2, len(inline_items)))
                         for index, image in enumerate(inline_items):
                             with image_columns[index % len(image_columns)]:

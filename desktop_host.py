@@ -210,7 +210,6 @@ def _find_available_port(preferred: int, excluded: set[int] | None = None) -> in
         if candidate in excluded:
             continue
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 probe.bind(("127.0.0.1", candidate))
             except OSError:
@@ -336,7 +335,8 @@ class DesktopHost:
         try:
             self.logs_root.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now(timezone.utc).isoformat()
-            safe = message.replace(os.environ.get("HOTSPOT_LOCAL_API_TOKEN", ""), "[token]")
+            token = os.environ.get("HOTSPOT_LOCAL_API_TOKEN", "")
+            safe = message.replace(token, "[token]") if token else message
             with self.startup_log.open("a", encoding="utf-8") as handle:
                 handle.write(f"[{timestamp}] {safe}\n")
         except Exception:
@@ -401,10 +401,11 @@ class DesktopHost:
                     self._wait_for(lambda: self._api_healthy(token), 20)
                     self._write_startup_log("API_RESTART_SUCCESS API_SINGLE_AUTO_RESTART_PASS")
                 except TimeoutError:
-                    self._write_startup_log(f"API_RESTART_FAILED exit_code={self.api_process.poll()}")
-                    raise StartupError("START-API-001", "本地服务启动失败。请重新启动软件。", None)
+                    exit_code = self.api_process.poll()
+                    self._write_startup_log(f"API_RESTART_FAILED exit_code={exit_code}")
+                    raise StartupError("START-API-001", self._api_start_failure_message(exit_code), None)
             else:
-                raise StartupError("START-API-001", "本地服务启动失败。请重新启动软件。", None)
+                raise StartupError("START-API-001", self._api_start_failure_message(self.api_process.poll()), None)
 
         self._write_startup_log("API_STARTUP_WAIT_PASS")
         # Write api.json immediately after API is healthy
@@ -436,6 +437,17 @@ class DesktopHost:
             [python, "-m", "uvicorn", "api:app", "--host", "127.0.0.1", "--port", str(self.api_port)],
             env=env, **kwargs
         )
+
+    def _api_start_failure_message(self, exit_code: int | None) -> str:
+        if exit_code in {3221225781, -1073741515}:
+            self._write_startup_log(
+                "API_RUNTIME_DLL_MISSING: runtime files may be damaged or incomplete; reinstall the full application package."
+            )
+            return "本地服务启动失败：运行时文件可能损坏或缺少 DLL，请重新安装完整版本。"
+        if exit_code is not None:
+            self._write_startup_log(f"API_PROCESS_EXITED_EARLY exit_code={exit_code}")
+            return f"本地服务启动失败：API 进程提前退出（退出码 {exit_code}），请查看 startup.log。"
+        return "本地服务启动失败：健康检查超时，请查看 startup.log。"
 
     def _clean_stale_runtime_files(self) -> None:
         """Remove runtime files from processes that are no longer running."""

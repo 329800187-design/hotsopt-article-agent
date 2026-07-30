@@ -10,6 +10,27 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "r2251_real_evidence_min.json"
 
 
+def _long_sections(content: str) -> list[dict]:
+    article_content = content.split("资料来源", 1)[0].split("参考资料", 1)[0]
+    paragraph = (
+        f"{article_content} 从背景解释看，相关事实需要放在公开资料和来源归属中理解，不能把资料来源列表里的数字误判为正文主张。"
+        "从影响分析看，读者需要知道哪些内容已经由来源支持，哪些只是后续观察方向。"
+        "从核验路径看，文章应优先核对发布日期、机构名称、地点和数字，再判断网络传播中的延伸说法是否可靠。"
+    )
+    return [
+        {"heading": "事件发生了什么", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "为什么受到关注", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "可能带来哪些影响", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "后续值得关注什么", "body": paragraph + "\n\n" + paragraph},
+    ]
+
+
+def _content_markdown(title: str, intro: str, sections: list[dict]) -> str:
+    parts = [f"# {title}", intro]
+    parts.extend(f"## {section['heading']}\n{section['body']}" for section in sections)
+    return "\n\n".join(parts)
+
+
 def _source_bundle() -> dict:
     facts = [
         {"fact_id": "f1", "canonical_fact": "2026年7月21日，外交部边海司负责人提出严正交涉。", "supporting_source_ids": ["s1"], "verification_type": "single_source"},
@@ -53,9 +74,14 @@ def _article_with_source_list(extra: str = "") -> dict:
         "[2] 腾讯新闻，发布时间：2026年7月21日，https://news.qq.com/\n"
         "[3] 央视新闻，发布时间：2026年7月21日，https://www.cctv.com/\n"
     )
+    intro = "这是一篇用于验证来源列表排除和事实扫描边界的完整文章导语。"
+    sections = _long_sections(body)
     return {
-        "content_markdown": body,
-        "word_count": 0,
+        "title": "公开资料事实扫描边界验证",
+        "content_markdown": _content_markdown("公开资料事实扫描边界验证", intro, sections),
+        "intro": intro,
+        "sections": sections,
+        "word_count": 1200,
         "fact_basis": [
             {"fact_id": "f1", "fact": "2026年7月21日，外交部边海司负责人提出严正交涉。", "source_ids": ["s1"]},
             {"fact_id": "f2", "fact": "仁爱礁是中国南沙群岛的一部分。", "source_ids": ["s1"]},
@@ -109,9 +135,14 @@ def _real_article(extra: str = "") -> tuple[dict, dict]:
     bundle["official_or_reliable_source_count"] = max(1, int(bundle.get("official_or_reliable_source_count") or bundle.get("official_source_count") or 0))
     content = "\n".join(str(item.get("canonical_fact") or item.get("fact") or "") for item in facts)
     content += f"\n{extra}\n\n资料来源\n[1] 外交部……\n[2] 腾讯新闻……\n[3] 央视新闻……\n"
+    intro = "这是一篇基于真实证据夹具生成的完整结构测试文章导语。"
+    sections = _long_sections(content)
     article = {
-        "content_markdown": content,
-        "word_count": 0,
+        "title": "真实证据三事实文章",
+        "content_markdown": _content_markdown("真实证据三事实文章", intro, sections),
+        "intro": intro,
+        "sections": sections,
+        "word_count": 1200,
         "fact_basis": [
             {
                 "fact_id": item["fact_id"],

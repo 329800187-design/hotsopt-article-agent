@@ -64,7 +64,7 @@ def test_STARTUP_LOG_PASS():
     source = text("desktop_host.py")
     assert "startup.log" in source
     assert "pywebview_version" in source
-    assert "API 进程退出码" in source
+    assert "API_PROCESS_EXITED_EARLY" in source
     assert "Streamlit 进程退出码" in source
     assert "traceback.format_exc" in source
     assert "HOTSPOT_LOCAL_API_TOKEN" in source
@@ -84,8 +84,10 @@ def test_START_ERROR_CODES_DISTINCT_PASS():
 
 
 def test_R2_2_1_OUTPUT_NAMES_PASS():
+    from modules.app_version import APP_VERSION
+
     build = text("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert "RC1.3.3-Lite-R2.2.8-P1" in build
-    assert "hotspot-article-agent-rc1-3-3-lite-r2-2-8-p1-source.zip" in build
+    assert APP_VERSION in build
+    assert "Source.zip" in build
     assert "_用户主流程GUI证据包.zip" in build
-    assert "RC1.3.3-Lite-R2.2.8-P1 Hermes修复与自检完成，等待用户复测" in build
+    assert "等待用户" in build

@@ -4,8 +4,8 @@ import re
 from typing import Any
 
 
-_NUMBER_PATTERN = re.compile(r"^[\s,]*([0-9]+(:\.[0-9]+))\s*([亿万千kKmM])", re.I)
-_MULTIPLIERS = {"亿": 100_000_000, "万": 10_000, "千": 1_000, "k": 1_000, "m": 1_000_000}
+_NUMBER_PATTERN = re.compile(r"^[\s,]*([0-9]+(?:\.[0-9]+)?)\s*([亿万千kKmM]?)", re.I)
+_MULTIPLIERS = {"亿": 100_000_000, "万": 10_000, "千": 1_000, "k": 1_000, "m": 1_000_000, "": 1}
 
 
 def normalize_hot_score(value: Any) -> float | None:
@@ -17,5 +17,8 @@ def normalize_hot_score(value: Any) -> float | None:
     match = _NUMBER_PATTERN.match(text)
     if not match:
         return None
-    score = float(match.group(1)) * _MULTIPLIERS.get(match.group(2).lower(), 1)
+    number = float(match.group(1))
+    unit = match.group(2)
+    multiplier = _MULTIPLIERS.get(unit, _MULTIPLIERS.get(unit.lower(), 1))
+    score = number * multiplier
     return int(score) if score.is_integer() else score

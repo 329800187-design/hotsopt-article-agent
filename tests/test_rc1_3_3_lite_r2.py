@@ -112,16 +112,15 @@ def test_SEMANTIC_VERIFIED_FACT_DEDUP_PASS():
 def test_PAID_BATCH_IMAGE_CONFIRMATION_PASS():
     api_source = Path("api.py").read_text(encoding="utf-8")
     ui_source = Path("ui/rc1_app.py").read_text(encoding="utf-8")
-    phrase = "我确认本次会真实调用图片模型，并可能产生费用"
-    assert phrase in api_source and phrase in ui_source
-    assert "PAID_BATCH_IMAGE_CONFIRMATION_REQUIRED" in api_source
+    assert "confirm_paid" in api_source and "confirm_paid" in ui_source
+    assert "PAID_IMAGE_CONFIRMATION_REQUIRED" in api_source
 
 
 def test_UNCONFIRMED_BATCH_ZERO_IMAGE_CALL_PASS():
     api_source = Path("api.py").read_text(encoding="utf-8")
     ui_source = Path("ui/rc1_app.py").read_text(encoding="utf-8")
     assert '"generation_calls": 0' in api_source
-    assert "disabled=image_mode != \"none\" and not paid_batch_confirmed" in ui_source
+    assert "image_plan_mode" in ui_source and "confirm_paid" in ui_source
 
 
 def test_DEFAULT_TWO_IMAGES_PER_ARTICLE_PASS():

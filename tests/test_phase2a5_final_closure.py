@@ -63,7 +63,7 @@ def test_security_scans_runtime_files_and_data_parent(tmp_path):
     db = root / "data" / "app.sqlite"
     with sqlite3.connect(db) as connection:
         connection.execute("CREATE TABLE secrets (value TEXT)")
-        connection.execute("INSERT INTO secrets VALUES ()", ("password=SQLITE_SECRET_VALUE",))
+        connection.execute("INSERT INTO secrets VALUES (?)", ("password=SQLITE_SECRET_VALUE",))
         connection.commit()
     result = scan_tree(root, [])
     assert result["status"] == "SECURITY_SCAN_FAILED"
@@ -90,12 +90,27 @@ def test_retry_cover_updates_public_model_info_without_text_retry(tmp_path, monk
     topic = HotTopic(id="phase2a5-topic", title="测试热点", summary="摘要", source="test", source_name="测试源", source_url="https://example.com/topic")
     store = SQLiteStore(tmp_path / "db.sqlite")
     store.save_topics([topic])
-    task = store.create_task("2A.5 retry", "multi_topic", [topic.to_dict()], 1)
+    task = store.create_task(
+        "2A.5 retry",
+        "multi_topic",
+        [topic.to_dict()],
+        1,
+        generation_options={"image_plan_mode": "standard", "image_generation_requested": True},
+    )
     calls = {"text": 0}
 
     def article(*args, **kwargs):
         calls["text"] += 1
-        return {"title": "真实标题", "intro": "摘要", "summary": "摘要", "sections": [{"heading": "一", "body": "正文", "image_brief": "场景"}] * 3, "content_markdown": "# 真实标题\n正文", "tags": [], "demo_mode": False}
+        body = (
+            "根据现有公开资料，文章先交代已经确认的信息，再说明仍待核实的内容。"
+            "读者可以通过来源、时间和主体进行交叉核验，也要注意传播风险和背景原因。"
+        )
+        sections = [
+            {"heading": "事实梳理", "body": body * 5, "image_brief": "场景"},
+            {"heading": "影响分析", "body": body * 5, "image_brief": "场景"},
+            {"heading": "后续关注", "body": body * 5, "image_brief": "场景"},
+        ]
+        return {"title": "真实标题", "intro": "这是一段结构完整的测试导语，用来确认封面重试不会重新调用文本模型。", "summary": "这是一段结构完整的测试导语，用来确认封面重试不会重新调用文本模型。", "sections": sections, "content_markdown": "# 真实标题\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections), "tags": [], "demo_mode": False}
 
     class Image:
         last_response_type = "base64"

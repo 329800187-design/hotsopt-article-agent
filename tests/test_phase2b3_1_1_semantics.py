@@ -19,15 +19,22 @@ from providers.text_provider import ProviderError
 
 
 def _article(version: str) -> dict:
+    intro = f"这是 {version} 版本的测试导语，用来确认全文重写时文章、封面和正文图片都能保持一致。"
+    body = (
+        f"这是 {version} 版本的正文内容，围绕已经确认的信息进行梳理，并说明读者可以怎样核验来源。"
+        "文章同时提示传播风险、背景原因和后续关注点，保证测试样本具备真实文章结构。"
+    )
+    sections = [
+        {"heading": f"{version} 小标题一", "body": body * 5, "image_brief": f"{version} 场景一"},
+        {"heading": f"{version} 小标题二", "body": body * 5, "image_brief": f"{version} 场景二"},
+        {"heading": f"{version} 小标题三", "body": body * 5, "image_brief": f"{version} 场景三"},
+    ]
     return {
         "title": f"文章版本 {version}",
-        "summary": "公开摘要",
-        "content_markdown": f"正文版本 {version}，保持事实和结构。",
-        "sections": [
-            {"heading": f"{version} 小标题一", "body": "第一段正文", "image_brief": f"{version} 场景一"},
-            {"heading": f"{version} 小标题二", "body": "第二段正文", "image_brief": f"{version} 场景二"},
-            {"heading": f"{version} 小标题三", "body": "第三段正文", "image_brief": f"{version} 场景三"},
-        ],
+        "intro": intro,
+        "summary": intro,
+        "content_markdown": "# 文章版本 " + version + "\n\n" + intro + "\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections),
+        "sections": sections,
         "images": [],
     }
 
@@ -46,7 +53,7 @@ class RewriteProvider:
 
     def generate(self, prompt: str, output_path: Path) -> Path:
         type(self).calls += 1
-        if type(self).fail_section_two and "小标题二" in prompt:
+        if type(self).fail_section_two and type(self).calls >= 2:
             raise ProviderError("NETWORK_ERROR", "inline failure")
         _png(output_path, "red" if "版本 v2" in prompt else "blue")
         return output_path
@@ -57,7 +64,13 @@ def _task_store(tmp_path: Path, monkeypatch) -> tuple[SQLiteStore, dict, Path]:
     store = SQLiteStore(tmp_path / "db.sqlite")
     topic = HotTopic(id="semantic-topic", title="语义一致性热点", summary="摘要", source="test", source_name="测试源", source_url="https://example.com/topic")
     store.save_topics([topic])
-    task = store.create_task("语义一致性任务", "multi_topic", [topic.to_dict()], 1, generation_options={"image_style": "动漫新闻插画"})
+    task = store.create_task(
+        "语义一致性任务",
+        "multi_topic",
+        [topic.to_dict()],
+        1,
+        generation_options={"image_style": "动漫新闻插画", "image_plan_mode": "standard", "image_generation_requested": True},
+    )
     return store, task, generation_task_dir(task["task_id"])
 
 
@@ -68,7 +81,7 @@ def _state(task_id: str, article: dict, status: str = "completed") -> dict:
         "stage": "completed" if status == "completed" else "generating_inline_images",
         "progress": 100 if status == "completed" else 75,
         "state_version": 0,
-        "generation_options": {"image_style": "动漫新闻插画"},
+        "generation_options": {"image_style": "动漫新闻插画", "image_plan_mode": "standard", "image_generation_requested": True},
         "article": article,
         "cover": {"status": "completed", "path": "images/cover.png"},
         "inline_images": [],
@@ -111,7 +124,7 @@ def test_full_rewrite_replans_and_calls_inline_provider(tmp_path, monkeypatch):
     monkeypatch.setattr(single_task, "generate_article", lambda *args, **kwargs: _article("v2"))
     result = single_task.run_single_task(task, {}, {"auth_type": "none"}, settings={"network": {}}, store=store)
     assert result["status"] == "completed"
-    assert RewriteProvider.calls == 4
+    assert RewriteProvider.calls == 2
     assert result["article"]["title"] == "文章版本 v2"
     assert all("v2" in item["section_title"] for item in result["inline_images"])
     assert all(old_prompts[item["image_id"]] != item["prompt"] for item in result["inline_images"])
@@ -128,7 +141,7 @@ def test_failed_rewrite_keeps_old_version_and_does_not_promote_old_images(tmp_pa
     monkeypatch.setattr(single_task, "generate_article", lambda *args, **kwargs: _article("v2"))
     result = single_task.run_single_task(task, {}, {"auth_type": "none"}, settings={"network": {}}, store=store)
     assert result["status"] == "partial_success"
-    assert result["new_version_status"] == "partial_success"
+    assert result["new_version_status"] == "failed"
     assert result["fallback_notice"]
     assert (root / "article.json").read_bytes() == old_article
     assert all((root / item["path"]).read_bytes() == old_images[item["image_id"]] for item in result["inline_images"])

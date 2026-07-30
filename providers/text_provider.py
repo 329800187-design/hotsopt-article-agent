@@ -115,7 +115,8 @@ def _response_preview(response: httpx.Response | None) -> str:
 def _content_type(response: httpx.Response | None) -> str:
     if response is None:
         return ""
-    return str(response.headers.get("Content-Type") or "").strip()
+    headers = getattr(response, "headers", {}) or {}
+    return str(headers.get("Content-Type") or "").strip()
 
 
 def _segments(path: str) -> list[str]:
@@ -304,8 +305,12 @@ def _decode_provider_response(response: httpx.Response) -> tuple[str, dict[str, 
 
     Handles: standard JSON wrapper, SSE streaming, plain text / Markdown.
     """
-    raw_body = str(response.text or "")
-    content_type = str(response.headers.get("Content-Type") or "").strip()
+    try:
+        raw_body = str(getattr(response, "text", "") or "")
+    except Exception:
+        raw_body = ""
+    headers = getattr(response, "headers", {}) or {}
+    content_type = str(headers.get("Content-Type") or "").strip()
     diagnostic: dict[str, Any] = {
         "http_status": response.status_code,
         "content_type": content_type,
@@ -371,6 +376,7 @@ class OpenAITextProvider:
         temperature: float,
         max_tokens: int,
         response_format: str = "none",
+        timeout_seconds: float | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """Unified text request — all call paths MUST use this single HTTP + decode pipeline."""
         url, url_details = _build_request_url(
@@ -390,6 +396,7 @@ class OpenAITextProvider:
             "response_preview": "",
             "elapsed_ms": 0,
             "error_type": "",
+            "timeout_seconds": None,
         }
         payload: dict[str, Any] = {
             "model": self.profile.get("model"),
@@ -403,7 +410,14 @@ class OpenAITextProvider:
         response: httpx.Response | None = None
         started = time.perf_counter()
         try:
-            timeout = float(self.profile.get("timeout_seconds") or self.network_settings.get("timeout_seconds") or 120)
+            configured_timeout = float(
+                timeout_seconds
+                or self.profile.get("timeout_seconds")
+                or self.network_settings.get("timeout_seconds")
+                or 150
+            )
+            timeout = max(90.0, min(180.0, configured_timeout))
+            diagnostic["timeout_seconds"] = timeout
             with create_http_client({**self.network_settings, "timeout_seconds": timeout}) as client:
                 response = client.post(url, headers=_headers(self.profile), json=payload)
             self.last_http_status = response.status_code
@@ -426,7 +440,7 @@ class OpenAITextProvider:
                     parse_retry_after(response.headers.get("Retry-After")),
                     details=dict(diagnostic),
                 )
-            if response.status_code == 502:
+            if response.status_code in (502, 504):
                 raise _classify_http_502(response, dict(diagnostic))
             response.raise_for_status()
             # ── unified decode ──

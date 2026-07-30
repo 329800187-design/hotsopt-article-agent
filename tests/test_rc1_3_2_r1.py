@@ -50,7 +50,7 @@ def test_quality_gate_rejects_untraceable_model_facts_and_short_article():
 
 
 def test_rc132_default_is_text_first_and_image_route_exists():
-    assert DEFAULT_SETTINGS["image_plan_mode"] == "standard"
+    assert DEFAULT_SETTINGS["image_plan_mode"] == "none"
     import api
 
     assert "/api/tasks/{task_id}/images/generate" in {route.path for route in api.app.routes}

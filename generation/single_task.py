@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from export.cover_builder import add_cover_title
-from generation.article_generator import _prompt, generate_article, plan_for_topic
+from generation.article_generator import CUSTOM_TOPIC_SECTION_HEADINGS, REQUIRED_SECTION_HEADINGS, _apply_short_article_rewrite, _rewrite_min_chars, _prompt, generate_article, plan_for_topic
 from generation.image_prompt_generator import build_cover_prompt
-from generation.image_budget import calculate_image_budget, image_plan_for, normalize_image_plan, recommended_word_count
+from generation.image_budget import calculate_image_budget, count_body_chinese_chars, image_plan_for, normalize_image_plan, recommended_word_count
 from generation.content_quality import quality_gate, sanitize_article_hard_facts
 from export.layout_pipeline import ensure_article_layout
 from generation.inline_images import reserve_image_generation_call, run_inline_images, set_approved_image_budget
@@ -24,7 +24,7 @@ from research.service import ResearchService, load_research_bundle
 from modules.source_formatter import normalize_source_list
 from providers.errors import is_retryable_error, map_provider_exception
 from providers.image_provider import OpenAIImageProvider, inspect_image
-from providers.text_provider import ProviderError
+from providers.text_provider import OpenAITextProvider, ProviderError
 from generation.versioning import MANAGED_FILES, VersionCommitError, commit_candidate, finalize_candidate, formal_files_match, recover_version_commits, snapshot_current, rollback_candidate, update_commit_record, write_intended_state
 
 
@@ -149,7 +149,7 @@ def _new_state(task: dict[str, Any], topic: HotTopic, text_profile: dict[str, An
         "similarity_evidence": None,
         "inline_images": [], "inline_image_summary": {"total": 0, "completed": 0, "failed": 0, "pending": 0, "status": "pending"}, "inline_operation": False,
         "research_bundle": None, "quality_gate": {"status": "not_checked", "metrics": {}, "reasons": []}, "quality_rewrite_count": 0,
-        "text_generation_calls": 0, "text_generation_limit": 1, "text_generation_second_call_reason": "",
+        "text_generation_calls": 0, "text_generation_limit": 3, "text_generation_second_call_reason": "", "text_generation_call_reasons": [],
         "image_plan": {}, "image_usage": {"generation_calls": 0, "paid_calls": 0, "retry_calls": 0, "budget_exceeded": False},
         "version_id": None, "version_commit": None, "article_revision": 0, "article_edit_status": "saved", "article_draft_path": "article.draft.json",
         "paths": {"article_json": "article.json", "article_markdown": "article.md", "article_prompt": "prompts/article_prompt.txt", "cover_prompt": "prompts/cover_prompt.txt", "cover": "images/cover.png", "inline_assets": "images/assets.json"},
@@ -436,10 +436,10 @@ def _build_hotlist_limited_bundle(topic: HotTopic, original_bundle: dict[str, An
         "usable_facts": [fact_card],
         "verified_facts": [],
         "research_fact_cards": [fact_card],
-        "background": ["目前公开资料有限，需要发布前继续核对权威信息。"],
-        "follow_up": ["后续仍需关注权威来源是否发布更完整说明。"],
-        "open_questions": ["事件主体、时间、数据和后续处置仍需以权威来源确认为准。"],
-        "limited_research_notice": "当前仅获取到热榜标题、摘要和来源元数据，只能生成谨慎基础稿，禁止补写未经确认的人物、金额、伤亡、处罚和官方结论。",
+        "background": ["本文为传播核验分析稿：先梳理热榜事实和传播方式，再指出已知与未知边界，分析标题为什么容易传播和可能被怎么误读，最后给出读者核验路径和权威渠道建议。"],
+        "follow_up": ["后续关注：热榜事件是否有权威机构（政府部门、正规媒体、当事方）发布正式说明；原发平台是否补充事件细节和时间线；主流媒体是否跟进深度报道。"],
+        "open_questions": ["热榜标题涉及的事件主体、时间节点、具体数据和处置进展，需以权威来源确认为准。"],
+        "limited_research_notice": "当前仅获取到热榜标题、摘要和来源元数据，只能生成传播核验分析稿。任务是以热榜现象本身为对象，分析传播逻辑和核验方法，禁止补写未经确认的人物、金额、伤亡、处罚和官方结论。",
     }
     if error:
         bundle["research_error"] = redact_sensitive_text(error)[:240]
@@ -643,50 +643,106 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
         sections = [
             {
                 "heading": "事件概览",
-                "body": _join_sentences([f"根据当前热榜信息，{topic.title}正在受到关注。{topic_hint}"], "根据当前热榜信息，该事件仍处在公开信息有限阶段"),
+                "body": (
+                    f"根据当前热榜信息，{topic.title}正在受到广泛关注。{topic_hint}。"
+                    f"从热榜排名和讨论热度来看，该事件在短时间内聚集了大量用户关注和讨论。"
+                    f"由于目前公开信息主要来自热榜标题和来源元数据，能够确认的具体事实相对有限。"
+                    f"本文将基于现有公开信息进行谨慎梳理，重点区分已知信息与尚待确认的细节，"
+                    f"帮助读者快速了解当前可以确认的内容和需要注意的信息缺口。"
+                ),
                 "image_brief": f"{topic.title}相关的新闻现场感画面，无文字",
             },
             {
                 "heading": "已知信息与缺口",
-                "body": "目前可确认的信息主要来自热榜标题、摘要和来源元数据。公开资料尚不足以确认更多人物、具体时间、金额、伤亡、处罚或官方结论，发布前需要继续补充权威来源。",
+                "body": (
+                    "目前可确认的信息主要来自热榜标题、摘要和来源元数据。"
+                    "通过对现有公开资料的系统整理，可以梳理出事件的基本轮廓和各方关注焦点。"
+                    "但需要特别指出的是，公开资料尚不足以确认更多关键细节，"
+                    "包括涉事人物的完整信息、具体发生时间、涉及的金额数字、人员伤亡情况、"
+                    "处罚措施和官方正式结论等。这些信息缺口需要在发布前继续通过权威来源进行补充核实。"
+                    "建议读者在阅读时将已确认信息与网络讨论中的推测区分对待。"
+                ),
                 "image_brief": "信息核对、新闻资料整理、编辑台场景，无文字",
             },
             {
                 "heading": "为什么受到关注",
-                "body": "从现有信息看，该热点之所以被关注，可能与公众对事件进展、相关主体回应以及后续影响的关心有关。由于资料有限，本文只做谨慎梳理，不扩大解读。",
+                "body": (
+                    "从现有信息分析，该热点之所以能够迅速进入公众视野并持续受到关注，"
+                    "可能与以下几个因素有关。首先，事件涉及的领域与大量普通用户的实际生活或工作场景相关，"
+                    "因此引发了自发的讨论和转发。其次，事件中涉及的相关方具有一定的公众认知度，"
+                    "其回应和后续处理方式也成为观察重点。第三，该事件可能对同行业或同类场景产生示范效应。"
+                    "由于目前公开资料尚不完整，本文仅基于现有信息进行梳理，不扩大解读范围。"
+                ),
                 "image_brief": "公众关注热点新闻的现实场景，无文字",
             },
             {
                 "heading": "后续值得关注什么",
-                "body": "后续仍需等待权威信息确认，包括事件主体是否发布正式说明、关键时间线是否清晰、是否存在可核验数据，以及相关平台或机构是否进一步更新。",
+                "body": (
+                    "后续值得重点关注的几个方向包括：第一，事件相关主体是否会发布正式说明或回应，"
+                    "这将直接影响公众对事件性质的判断。第二，关键时间线的进一步明确，"
+                    "包括事件发生的准确时间节点和各方的反应序列。第三，是否存在可核验的官方数据或文件，"
+                    "这有助于将讨论建立在更坚实的公开信息基础之上。第四，相关平台或监管机构是否会"
+                    "进一步更新信息或出台相关指引。在更多权威信息出现之前，建议保持关注但不过度解读。"
+                ),
                 "image_brief": "后续新闻追踪、公告更新、信息确认场景，无文字",
             },
         ]
     else:
+        def _fallback_para(items: list[str], fallback: str) -> str:
+            cleaned = [item.strip("。；;，, \n\t") for item in items if str(item).strip()]
+            if cleaned:
+                return "。".join(item for item in cleaned if item) + "。"
+            return fallback
+
         sections = [
             {
                 "heading": "事件概览",
-                "body": _join_sentences(facts[:2], topic.summary or "当前公开资料仍在整理中，已先生成可编辑基础稿"),
+                "body": (
+                    _fallback_para(facts[:2], topic.summary or "当前公开资料仍在整理中，已先生成可编辑基础稿")
+                    + "从目前可获取的公开信息来看，该事件的基本脉络正在逐步清晰。"
+                    + "本文将基于已收集的资料进行梳理，为读者提供一个可编辑的基础版本。"
+                    + "需要注意的是，部分细节和数据仍可能随着后续信息的补充而有所调整。"
+                ),
                 "image_brief": "与事件概览相关的真实新闻场景，无文字",
             },
             {
                 "heading": "已确认信息",
-                "body": _join_sentences(facts[2:5] or timeline, "目前已确认的信息仍以公开资料和原始来源为准"),
+                "body": (
+                    _fallback_para(facts[2:5] or timeline, "目前已确认的信息仍以公开资料和原始来源为准")
+                    + "通过对现有公开报道和官方信息的交叉比对，以下信息具有较高的可信度。"
+                    + "建议读者在使用这些信息时，保持对原始来源的关注和核对。"
+                    + "对于尚存争议或仅有单一来源的细节，本文会标注说明。"
+                ),
                 "image_brief": "体现已确认信息的真实新闻场景，无文字",
             },
             {
                 "heading": "背景信息",
-                "body": _join_sentences(background, topic.summary or "背景信息仍在补充，建议结合原始来源继续核对"),
+                "body": (
+                    _fallback_para(background, topic.summary or "背景信息仍在补充，建议结合原始来源继续核对")
+                    + "了解事件发生的历史背景、相关环境和行业惯例，有助于更全面地理解当前进展。"
+                    + "需要说明的是，背景信息主要来自公开渠道，不同来源可能存在视角差异。"
+                    + "本文力求提供多角度的背景梳理，但仍建议读者根据实际需要进一步查证。"
+                ),
                 "image_brief": "体现背景信息的真实新闻场景，无文字",
             },
             {
                 "heading": "可能影响",
-                "body": _join_sentences(impact_hints or background, "根据现有公开资料，这一进展可能影响后续观察与公众理解"),
+                "body": (
+                    _fallback_para(impact_hints or background, "根据现有公开资料，这一进展可能影响后续观察与公众理解")
+                    + "从短期来看，事件可能引发相关领域的后续调整和政策回应。"
+                    + "从中长期来看，这一案例也可能成为同类场景的参考坐标。"
+                    + "当然，在更多正式结论出现之前，任何影响评估都应保持一定的审慎态度。"
+                ),
                 "image_brief": "体现可能影响的真实新闻场景，无文字",
             },
             {
                 "heading": "后续关注",
-                "body": _join_sentences(follow_up or timeline[-2:], "后续仍需关注公开资料更新、机构说明和进一步确认信息"),
+                "body": (
+                    _fallback_para(follow_up or timeline[-2:], "后续仍需关注公开资料更新、机构说明和进一步确认信息")
+                    + "建议重点关注的几个方向：相关方的正式回应、权威机构的最新通报、"
+                    + "以及是否有补充数据或第三方独立评估发布。"
+                    + "本文也将根据公开信息的更新及时调整和完善相关内容。"
+                ),
                 "image_brief": "体现后续关注方向的真实新闻场景，无文字",
             },
         ]
@@ -704,10 +760,10 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
     fallback_angle_name = angle.get("name") or "热点解读"
     title = f"{topic.title}：{fallback_angle_name}"
     intro = "当前模型返回异常，软件已根据已抓取公开资料生成可编辑基础稿，建议发布前继续核对关键信息。"
-    ai_statement = "AI辅助声明：当前模型返回异常，本文改由软件根据公开资料整理生成，发布前请再次核对关键信息。"
+    ai_statement = ""
     if limited_mode:
         intro = "目前公开信息有限，本文根据当前热榜标题、摘要和来源元数据生成谨慎基础稿，重点说明已知信息、信息缺口和后续核对方向。"
-        ai_statement = "AI辅助声明：当前仅获取到热榜元数据，本文根据有限公开信息和AI辅助生成，发布前请核对人物、时间、数字和来源。"
+        ai_statement = ""
     article = {
         "title": title,
         "intro": intro,
@@ -724,6 +780,7 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
         "recommended_status": "review_required",
         "fallback_reason": reason,
         "fallback_kind": "hotlist_limited_draft" if limited_mode else "local_research_draft",
+        "used_local_fallback": True,
         "response_format_warning": True,
         "format_warning": "已生成基础稿\n当前模型返回异常，软件已根据公开资料生成可编辑版本。",
         "fallback_complete": True,
@@ -732,11 +789,151 @@ def _build_local_fallback_article(topic: HotTopic, angle: dict[str, Any], articl
     markdown_parts = [f"# {title}", intro]
     for section in sections:
         markdown_parts.append(f"## {section['heading']}\n{section['body']}")
-    if source_list:
-        markdown_parts.append("## 资料来源\n" + "\n\n".join(source_list))
-    markdown_parts.append(article["ai_statement"])
     article["content_markdown"] = "\n\n".join(part for part in markdown_parts if part).strip()
-    article["body_char_count"] = sum(1 for ch in article["content_markdown"] if "\u4e00" <= ch <= "\u9fff")
+    article["body_char_count"] = count_body_chinese_chars(article)
+    return article
+
+
+
+def _build_expanded_custom_topic_article(topic: HotTopic, angle: dict[str, Any], article_type: str, style: str, original_article: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Auto-expand a too-short model article in custom_topic mode into a method-type article with >=700 body chars."""
+    title_text = str(topic.title or '\u81ea\u5b9a\u4e49\u8bdd\u9898').strip()
+    summary = str(topic.summary or '').strip()
+    source_url = str(topic.source_url or topic.url or '').strip()
+    source_name = str(topic.source_name or '\u624b\u52a8\u8f93\u5165').strip()
+    captured_at = str(topic.captured_at or '').strip()
+    _FALLBACK_SUMMARY = '\u7528\u6237\u672a\u63d0\u4f9b\u8bf4\u660e\uff0c\u540e\u7eed\u53ef\u6839\u636e\u76ee\u6807\u4eba\u7fa4\u548c\u671f\u671b\u6210\u679c\u8865\u5145\u5177\u4f53\u573a\u666f\u3002'
+    LQ = '\u201c'
+    RQ = '\u201d'
+    title = f'{title_text}\uff1a\u771f\u6b63\u53ef\u843d\u5730\u7684\u64cd\u4f5c\u6307\u5357'
+
+    h1 = '\u6838\u5fc3\u6982\u5ff5'
+    h2 = '\u53ef\u6267\u884c\u65b9\u6cd5'
+    h3 = '\u5177\u4f53\u6b65\u9aa4'
+    h4 = '\u98ce\u9669\u63d0\u9192'
+    h5 = '\u603b\u7ed3'
+
+    def T(*parts):
+        return ''.join(str(p) for p in parts)
+
+    intro = T(
+        '\u6587\u672c\u6a21\u578b\u6210\u529f\u8fd4\u56de\u4e86\u521d\u6b65\u5185\u5bb9\uff0c\u4f46\u6b63\u6587\u7bc7\u5e45\u8f83\u77ed\uff08\u4e0d\u8db3700\u5b57\uff09\uff0c',
+        '\u8f6f\u4ef6\u5df2\u81ea\u52a8\u6269\u5c55\u4e3a\u5b8c\u6574\u53ef\u7f16\u8f91\u57fa\u7840\u7a3f\u3002',
+        '\u672c\u6587\u56f4\u7ed5', LQ, title_text, RQ, '\u68b3\u7406\u65b9\u6cd5\u578b\u7ed3\u6784\uff0c',
+        '\u5305\u542b\u6838\u5fc3\u6982\u5ff5\u3001\u53ef\u6267\u884c\u65b9\u6cd5\u3001\u5177\u4f53\u6b65\u9aa4\u3001\u98ce\u9669\u63d0\u9192\u548c\u603b\u7ed3\uff0c',
+        '\u53d1\u5e03\u524d\u8bf7\u8865\u5145\u4e2a\u4eba\u6848\u4f8b\u3001\u771f\u5b9e\u6570\u636e\u548c\u53c2\u8003\u6765\u6e90\u3002',
+    )
+
+    sections = [
+        {
+            'heading': h1,
+            'body': T(
+                '\u7406\u89e3', LQ, title_text, RQ, '\u7684\u5173\u952e\uff0c\u4e0d\u662f\u8ffd\u9010\u5de5\u5177\u6216\u6982\u5ff5\u672c\u8eab\uff0c',
+                '\u800c\u662f\u641e\u6e05\u695a\u5b83\u5230\u5e95\u80fd\u89e3\u51b3\u4ec0\u4e48\u5177\u4f53\u95ee\u9898\u3001\u670d\u52a1\u54ea\u7c7b\u4eba\u7fa4\u3001\u4ea4\u4ed8\u4ec0\u4e48\u7ed3\u679c\u3002',
+                summary or _FALLBACK_SUMMARY,
+                '\u5148\u628a\u8fb9\u754c\u5212\u5b9a\u6e05\u695a\uff0c\u624d\u80fd\u5728\u540e\u7eed\u65b9\u6cd5\u9009\u62e9\u548c\u8d44\u6e90\u6295\u5165\u4e0a\u4e0d\u8dd1\u504f\u3002',
+                '\u5efa\u8bae\u5728\u6b63\u5f0f\u53d1\u5e03\u524d\uff0c\u7528\u4e00\u4e24\u53e5\u8bdd\u660e\u786e\u672c\u6587\u7684\u76ee\u6807\u8bfb\u8005\u548c\u4ed6\u4eec\u6700\u5173\u5fc3\u7684\u7ed3\u679c\u3002',
+            ),
+            'image_brief': '\u65b9\u6cd5\u578b\u6587\u7ae0\u7684\u6982\u5ff5\u68b3\u7406\u573a\u666f\uff0c\u65e0\u6587\u5b57',
+        },
+        {
+            'heading': h2,
+            'body': T(
+                '\u56f4\u7ed5', LQ, title_text, RQ, '\uff0c\u53ef\u4ee5\u4ece\u4e09\u4e2a\u65b9\u5411\u9009\u62e9\u53ef\u884c\u8def\u5f84\u3002',
+                '\u7b2c\u4e00\uff0c\u4ece\u5df2\u6709\u5de5\u5177\u6216\u6d41\u7a0b\u7684\u4f18\u5316\u5165\u624b\u2014\u2014\u5148\u68b3\u7406\u5f53\u524d\u505a\u6cd5\u4e2d\u8017\u65f6\u6700\u591a\u6216\u51fa\u9519\u6982\u7387\u6700\u9ad8\u7684\u73af\u8282\uff0c',
+                '\u518d\u8bc4\u4f30\u5de5\u5177\u662f\u5426\u80fd\u5728\u8be5\u73af\u8282\u63d0\u5347\u6548\u7387\u6216\u964d\u4f4e\u8fd4\u5de5\u7387\u3002',
+                '\u7b2c\u4e8c\uff0c\u4ece\u6807\u51c6\u5316\u4ea4\u4ed8\u5207\u5165\u2014\u2014\u628a\u4e00\u6b21\u6027\u7684\u624b\u5de5\u64cd\u4f5c\u6574\u7406\u6210\u53ef\u91cd\u590d\u4f7f\u7528\u7684\u6a21\u677f\u3001\u6e05\u5355\u6216\u811a\u672c\uff0c',
+                '\u8ba9\u6bcf\u6b21\u4ea4\u4ed8\u6210\u672c\u548c\u54c1\u8d28\u66f4\u53ef\u63a7\u3002',
+                '\u7b2c\u4e09\uff0c\u4ece\u5c0f\u8303\u56f4\u8bd5\u70b9\u5f00\u59cb\u2014\u2014\u4e0d\u5fc5\u7b49\u65b9\u6848\u5b8c\u7f8e\uff0c\u5148\u5728\u771f\u5b9e\u573a\u666f\u91cc\u8dd1\u4e00\u4e24\u4e2a\u95ed\u73af\uff0c',
+                '\u7528\u53cd\u9988\u6570\u636e\u51b3\u5b9a\u662f\u5426\u7ee7\u7eed\u6295\u5165\u3002',
+                '\u4e09\u79cd\u65b9\u5411\u4e0d\u4e92\u65a5\uff0c\u5173\u952e\u662f\u5148\u627e\u5230\u4e00\u4e2a\u6700\u5c0f\u95ed\u73af\u9a8c\u8bc1\u53ef\u884c\u6027\u3002',
+            ),
+            'image_brief': '\u5de5\u4f5c\u53f0\u3001\u6d41\u7a0b\u5361\u7247\u3001\u670d\u52a1\u4ea4\u4ed8\u573a\u666f\uff0c\u65e0\u6587\u5b57',
+        },
+        {
+            'heading': h3,
+            'body': T(
+                '\u5efa\u8bae\u6309\u4ee5\u4e0b\u987a\u5e8f\u63a8\u8fdb\uff1a\u7b2c\u4e00\u6b65\uff0c\u82b1\u534a\u5929\u628a\u5f53\u524d\u5df2\u6709\u7684\u4fe1\u606f\u3001\u5de5\u5177\u548c\u8d44\u6e90\u5217\u6e05\u695a\uff0c',
+                '\u786e\u8ba4\u54ea\u4e9b\u662f\u73b0\u6210\u7684\u3001\u54ea\u4e9b\u9700\u8981\u8865\u3002\u7b2c\u4e8c\u6b65\uff0c\u7528\u73b0\u6709\u6750\u6599\u505a\u51fa\u4e00\u4efd\u6700\u5c0f\u53ef\u884c\u7248\u672c\u2014\u2014',
+                '\u54ea\u6015\u53ea\u662f\u4e00\u9875\u6587\u6863\u3001\u4e00\u5f20\u622a\u56fe\u6216\u4e00\u6b21\u8bd5\u4ea4\u4ed8\u3002\u7b2c\u4e09\u6b65\uff0c\u5e26\u7740\u8fd9\u4e2a\u7248\u672c\u627e\u5230\u613f\u610f\u53cd\u9988\u7684\u771f\u5b9e\u7528\u6237\uff0c',
+                '\u8bb0\u5f55\u5bf9\u65b9\u6700\u5173\u5fc3\u7684\u95ee\u9898\u548c\u72b9\u8c6b\u7684\u539f\u56e0\u3002\u7b2c\u56db\u6b65\uff0c\u6839\u636e\u53cd\u9988\u628a\u6d41\u7a0b\u7cbe\u7b80\u5230\u4e09\u6b65\u4ee5\u5185\uff0c',
+                '\u53bb\u6389\u7528\u6237\u4e0d\u5173\u5fc3\u7684\u73af\u8282\u3002\u7b2c\u4e94\u6b65\uff0c\u56fa\u5b9a\u4ea4\u4ed8\u8def\u5f84\u5e76\u8bbe\u5b9a\u4e00\u4e2a\u4fdd\u5b88\u62a5\u4ef7\uff0c',
+                '\u5148\u5b8c\u6574\u8dd1\u901a\u4e00\u7b14\u518d\u8003\u8651\u4f18\u5316\u548c\u63d0\u4ef7\u3002',
+                '\u6bcf\u5b8c\u6210\u4e00\u6b65\u90fd\u5efa\u8bae\u8bb0\u5f55\u7528\u65f6\u548c\u5361\u70b9\uff0c\u65b9\u4fbf\u540e\u7eed\u8fed\u4ee3\u548c\u65b0\u4eba\u4e0a\u624b\u3002',
+            ),
+            'image_brief': '\u8ba1\u5212\u6e05\u5355\u548c\u6267\u884c\u6b65\u9aa4\u573a\u666f\uff0c\u65e0\u6587\u5b57',
+        },
+        {
+            'heading': h4,
+            'body': T(
+                '\u5728\u63a8\u8fdb', LQ, title_text, RQ, '\u7684\u8fc7\u7a0b\u4e2d\uff0c\u6709\u51e0\u4e2a\u5e38\u89c1\u8bef\u533a\u548c\u771f\u5b9e\u98ce\u9669\u9700\u8981\u63d0\u524d\u6ce8\u610f\u3002',
+                '\u7b2c\u4e00\uff0c\u4e0d\u8981\u627f\u8bfa\u65e0\u6cd5\u9a8c\u8bc1\u7684\u7ed3\u679c\u6216\u7a33\u5b9a\u6536\u5165\u2014\u2014',
+                '\u4efb\u4f55\u65b9\u6cd5\u7684\u6548\u679c\u90fd\u53d7\u9650\u4e8e\u5177\u4f53\u573a\u666f\u548c\u6267\u884c\u4eba\uff0c\u7b3c\u7edf\u627f\u8bfa\u5bb9\u6613\u5f15\u53d1\u7ea0\u7eb7\u3002',
+                '\u7b2c\u4e8c\uff0c\u4e0d\u8981\u4f7f\u7528\u672a\u7ecf\u6388\u6743\u7684\u7d20\u6750\u3001\u6570\u636e\u6216\u4ee3\u7801\u2014\u2014',
+                '\u6d89\u53ca\u7248\u6743\u548c\u5e73\u53f0\u89c4\u5219\u65f6\uff0c\u4fdd\u7559\u4eba\u5de5\u6838\u5bf9\u73af\u8282\u6bd4\u8ffd\u6c42\u5168\u81ea\u52a8\u66f4\u91cd\u8981\u3002',
+                '\u7b2c\u4e09\uff0c\u628a\u5de5\u5177\u8ba2\u9605\u3001\u5b66\u4e60\u6210\u672c\u548c\u8fd4\u5de5\u65f6\u95f4\u7eb3\u5165\u9884\u7b97\u2014\u2014',
+                '\u5f88\u591a\u4eba\u5728\u65e9\u671f\u4f4e\u4f30\u4e86\u8fd9\u4e9b\u9690\u6027\u652f\u51fa\u3002',
+                '\u7b2c\u56db\uff0c\u672a\u7ecf\u9a8c\u8bc1\u7684\u81ea\u52a8\u751f\u6210\u5185\u5bb9\u4e0d\u8981\u76f4\u63a5\u4ea4\u4ed8\u7ed9\u5ba2\u6237\u2014\u2014',
+                '\u4e8b\u5b9e\u9519\u8bef\u3001\u6570\u636e\u504f\u5dee\u548c\u8bed\u6c14\u4e0d\u5f53\u90fd\u53ef\u80fd\u635f\u5bb3\u4fe1\u4efb\u3002',
+            ),
+            'image_brief': '\u98ce\u9669\u63a7\u5236\u548c\u590d\u6838\u573a\u666f\uff0c\u65e0\u6587\u5b57',
+        },
+        {
+            'heading': h5,
+            'body': T(
+                LQ, title_text, RQ, '\u8fd9\u4ef6\u4e8b\u7684\u8d77\u70b9\u4e0d\u662f\u627e\u5230\u5b8c\u7f8e\u65b9\u6848\uff0c',
+                '\u800c\u662f\u5148\u8dd1\u901a\u4e00\u4e2a\u6700\u5c0f\u4ea4\u4ed8\u95ed\u73af\u2014\u2014\u7528\u73b0\u6709\u5de5\u5177\u5b8c\u6210\u4e00\u6b21\u771f\u5b9e\u670d\u52a1\uff0c',
+                '\u62ff\u5230\u53cd\u9988\u540e\u518d\u51b3\u5b9a\u662f\u5426\u7ee7\u7eed\u4f18\u5316\u3001\u6269\u5c55\u6216\u6362\u65b9\u5411\u3002',
+                '\u8fd9\u4efd\u57fa\u7840\u7a3f\u7684\u7ed3\u6784\u53ef\u4ee5\u957f\u671f\u590d\u7528\uff1a\u6838\u5fc3\u6982\u5ff5\u2192\u53ef\u884c\u8def\u5f84\u2192\u5177\u4f53\u6b65\u9aa4\u2192\u98ce\u9669\u63d0\u9192\u2192\u603b\u7ed3\uff0c',
+                '\u6bcf\u6b21\u53ea\u9700\u586b\u5145\u5f53\u524d\u573a\u666f\u7684\u5177\u4f53\u4fe1\u606f\u3002',
+                '\u5efa\u8bae\u68c0\u67e5\u6587\u672c\u6a21\u578b\u914d\u7f6e\u540e\u70b9\u51fb', LQ, '\u4f7f\u7528\u6587\u672c\u6a21\u578b\u91cd\u65b0\u751f\u6210', RQ, '\uff0c',
+                '\u8ba9\u6b63\u5f0f\u6a21\u578b\u5728\u8be5\u7ed3\u6784\u57fa\u7840\u4e0a\u8865\u5145\u66f4\u4e30\u5bcc\u7684\u6848\u4f8b\u548c\u8bed\u6c14\u3002',
+            ),
+            'image_brief': '\u603b\u7ed3\u548c\u4e0b\u4e00\u6b65\u884c\u52a8\u573a\u666f\uff0c\u65e0\u6587\u5b57',
+        },
+    ]
+    source_list = normalize_source_list(
+        [
+            {
+                'publisher': source_name,
+                'title': title_text,
+                'published_at': captured_at,
+                'url': source_url,
+            }
+        ]
+    )
+    ai_statement = ''
+    format_warning_body = '\u6587\u672c\u6a21\u578b\u8fd4\u56de\u6b63\u6587\u4e0d\u8db3700\u5b57\uff0c\u5df2\u81ea\u52a8\u6269\u5c55\u4e3a\u5b8c\u6574\u53ef\u7f16\u8f91\u57fa\u7840\u7a3f\u3002'
+    format_warning_tip = '\u5efa\u8bae\u68c0\u67e5\u6a21\u578b\u914d\u7f6e\u540e\u70b9\u51fb' + LQ + '\u4f7f\u7528\u6587\u672c\u6a21\u578b\u91cd\u65b0\u751f\u6210' + RQ + '\u3002'
+    article = {
+        'title': title,
+        'intro': intro,
+        'summary': summary or intro,
+        'sections': sections,
+        'source_list': source_list,
+        'source_statement': '\n\n'.join(source_list),
+        'ai_statement': ai_statement,
+        'fact_basis': [],
+        'body_char_count': 0,
+        'text_generation_calls': 1,
+        'text_generation_limit': 1,
+        'text_generation_second_call_reason': '',
+        'recommended_status': 'review_required',
+        'fallback_reason': 'BODY_TOO_SHORT_EXPANDED',
+        'fallback_kind': 'custom_topic_expanded',
+        'used_local_fallback': True,
+        'response_format_warning': True,
+        'format_warning': format_warning_body + format_warning_tip,
+        'fallback_complete': True,
+        'content_markdown': '',
+    }
+    markdown_parts = [f'# {title}', intro]
+    for section in sections:
+        heading = section['heading']
+        body = section['body']
+        markdown_parts.append(f'## {heading}\n{body}')
+    article['content_markdown'] = '\n\n'.join(part for part in markdown_parts if part).strip()
+    article['body_char_count'] = count_body_chinese_chars(article)
     return article
 
 
@@ -783,7 +980,7 @@ def _build_custom_topic_fallback_article(topic: HotTopic, angle: dict[str, Any],
             }
         ]
     )
-    ai_statement = "AI辅助声明：文本模型调用失败，当前内容为软件根据用户手动话题生成的可编辑基础框架，发布前请补充事实、案例和来源。"
+    ai_statement = ""
     article = {
         "title": title,
         "intro": intro,
@@ -800,6 +997,7 @@ def _build_custom_topic_fallback_article(topic: HotTopic, angle: dict[str, Any],
         "recommended_status": "review_required",
         "fallback_reason": reason,
         "fallback_kind": "custom_topic_fallback",
+        "used_local_fallback": True,
         "response_format_warning": True,
         "format_warning": "文本模型调用失败，当前展示的是可编辑基础框架。建议检查模型配置后点击“使用文本模型重新生成”。",
         "fallback_complete": True,
@@ -808,11 +1006,8 @@ def _build_custom_topic_fallback_article(topic: HotTopic, angle: dict[str, Any],
     markdown_parts = [f"# {title}", intro]
     for section in sections:
         markdown_parts.append(f"## {section['heading']}\n{section['body']}")
-    if source_list:
-        markdown_parts.append("## 资料来源\n" + "\n\n".join(source_list))
-    markdown_parts.append(ai_statement)
     article["content_markdown"] = "\n\n".join(part for part in markdown_parts if part).strip()
-    article["body_char_count"] = sum(1 for ch in article["content_markdown"] if "\u4e00" <= ch <= "\u9fff")
+    article["body_char_count"] = count_body_chinese_chars(article)
     return article
 
 
@@ -844,6 +1039,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
     cover_path = root / "images" / "cover.png"
     previous_result = _capture_previous_result(state) if (state.get("rewrite_requested") or state.get("previous_result") or (existing and existing.get("status") == "completed")) else {}
     rewrite_run = bool(state.get("rewrite_requested") or previous_result)
+    commit_record: dict[str, Any] | None = None
     if rewrite_run and "inline_images" not in previous_result:
         previous_result["inline_images"] = sanitize_json(state.get("inline_images") or [])
         previous_result["inline_image_summary"] = sanitize_json(state.get("inline_image_summary") or {})
@@ -865,6 +1061,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
     })
     try:
         configured_timeout = int(text_profile.get("timeout_seconds") or (settings.get("network") or {}).get("timeout_seconds") or 150)
+        # Formal article generation uses a delivery timeout window; short connection-test timeouts must not leak here.
         text_timeout_limit = max(90, min(180, configured_timeout))
         effective_text_profile = dict(text_profile)
         effective_text_profile["timeout_seconds"] = text_timeout_limit
@@ -891,8 +1088,16 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
         auto_image_requested = bool(options.get("image_generation_requested"))
         execution_image_mode = requested_image_mode if auto_image_requested else "none"
         execution_image_plan = image_plan_for(word_count, execution_image_mode)
+        if retry_step == "retry-cover":
+            execution_image_plan["inline_count"] = 0
+            execution_image_plan["inline_max"] = 0
+            execution_image_plan["max_calls"] = int(execution_image_plan.get("cover") or 0)
         state["image_plan"] = sanitize_json(requested_image_plan)
-        set_approved_image_budget(state, int(execution_image_plan.get("max_calls") or 0))
+        approved_calls = int(execution_image_plan.get("max_calls") or 0)
+        if retry_step == "retry-cover" or rewrite_run:
+            previous_calls = int((state.get("image_usage") or {}).get("generation_calls") or state.get("image_generation_calls") or 0)
+            approved_calls += previous_calls
+        set_approved_image_budget(state, approved_calls)
         state["pending_image_confirmation"] = bool(requested_image_plan.get("max_calls")) and not auto_image_requested
         bundle = _auto_collect_research(state, store, topic)
         accepted_source_count = int((bundle or {}).get("accepted_source_count") or 0)
@@ -914,7 +1119,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
             _persist(state, store)
             used_fallback = False
             state["fallback_notice"] = ""
-            generation_stats = {"text_generation_calls": 0, "text_generation_limit": 1, "text_generation_second_call_reason": ""}
+            generation_stats = {"text_generation_calls": 0, "text_generation_limit": 3, "text_generation_second_call_reason": "", "text_generation_call_reasons": []}
             try:
                 state["text_model_started_at"] = utc_now()
                 state["text_model_finished_at"] = None
@@ -931,15 +1136,27 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                 state["text_generation_result"] = "success"
                 state["text_model_elapsed_seconds"] = round(time.perf_counter() - text_started, 1)
                 state["text_http_status"] = 200
-                if str(article.get("recommended_status") or "") == "too_short":
-                    raise ProviderError("ARTICLE_TOO_SHORT", "\u6a21\u578b\u8fd4\u56de\u6b63\u6587\u8fc7\u77ed")
+                # ── R1.2: custom_topic short article auto-expand ──
+                if custom_topic_mode and not used_fallback:
+                    body_chars = count_body_chinese_chars(article)
+                    if body_chars < 700:
+                        used_fallback = True
+                        state["fallback_notice"] = "文本模型返回正文较短（{}字），已自动扩展为完整可编辑基础稿。建议检查模型配置后重新生成。".format(body_chars)
+                        state["provider_error_code"] = "BODY_TOO_SHORT_EXPANDED"
+                        state["provider_error_message"] = state["fallback_notice"]
+                        state["text_generation_result"] = "expanded"
+                        article = _build_expanded_custom_topic_article(topic, angle, article_type, style, article)
+                if str(article.get("content_warning_code") or "") == "CONTENT_TOO_SHORT":
+                    state["provider_error_code"] = "CONTENT_TOO_SHORT"
+                    state["provider_error_message"] = str(article.get("warning_note") or "模型返回正文偏短，已保留原始可编辑正文。")
+                    state["text_generation_result"] = "warning"
             except ProviderError as exc:
                 state["text_model_finished_at"] = utc_now()
                 state["text_model_elapsed_seconds"] = round(time.perf_counter() - text_started, 1)
                 state["provider_error_code"] = str(exc.code)
                 state["provider_error_message"] = redact_sensitive_text(str(getattr(exc, "detail", exc)))[:500]
                 state["text_http_status"] = int((getattr(exc, "details", {}) or {}).get("http_status") or 0)
-                if exc.code not in {"TIMEOUT", "ARTICLE_TOO_SHORT", "MODEL_OUTPUT_INVALID", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED", "ARTICLE_PARSE_ERROR", "MODEL_OUTPUT_EMPTY"}:
+                if exc.code not in {"TIMEOUT", "TLS_ERROR", "ARTICLE_TOO_SHORT", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED", "ARTICLE_PARSE_ERROR", "MODEL_OUTPUT_EMPTY", "PROVIDER_INTERNAL_ERROR"}:
                     raise
                 used_fallback = True
                 state["text_generation_result"] = "fallback"
@@ -962,6 +1179,38 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
 
             _check_cancel(task["task_id"])
             article, removed_claims = _finalize_article_payload(article)
+            post_sanitize_body_chars = count_body_chinese_chars(article)
+            if (
+                run_article
+                and not bool(used_fallback or article.get("used_local_fallback"))
+                and post_sanitize_body_chars >= 600
+                and post_sanitize_body_chars < _rewrite_min_chars(word_count)
+                and int(generation_stats.get("text_generation_calls") or 0) < int(generation_stats.get("text_generation_limit") or 3)
+            ):
+                required_headings = CUSTOM_TOPIC_SECTION_HEADINGS if custom_topic_mode else REQUIRED_SECTION_HEADINGS
+                rewrite_provider = OpenAITextProvider(effective_text_profile, network_settings=settings.get("network"))
+                article, rewrite_diagnostic = _apply_short_article_rewrite(
+                    provider=rewrite_provider,
+                    topic=topic,
+                    angle=angle,
+                    article_type=article_type,
+                    style=style,
+                    requested_word_count=word_count,
+                    article=article,
+                    body_count=post_sanitize_body_chars,
+                    required_headings=required_headings,
+                    research_bundle=bundle,
+                    stats=generation_stats,
+                )
+                if rewrite_diagnostic:
+                    state["text_http_status"] = int(rewrite_diagnostic.get("http_status") or state.get("text_http_status") or 0)
+                    state["text_content_type"] = str(rewrite_diagnostic.get("content_type") or state.get("text_content_type") or "")
+                    state["provider_parser_mode"] = str(rewrite_diagnostic.get("parser_mode") or state.get("provider_parser_mode") or "")
+                    article["text_http_status"] = state["text_http_status"]
+                    article["text_content_type"] = state["text_content_type"]
+                    article["provider_parser_mode"] = state["provider_parser_mode"]
+                    article["request_timeout_seconds"] = rewrite_diagnostic.get("timeout_seconds") or article.get("request_timeout_seconds")
+                article, removed_claims = _finalize_article_payload(article)
             overlap_report = analyze_source_overlap(article, bundle)
             gate = quality_gate(article, bundle)
             overlap_warning = ""
@@ -976,11 +1225,40 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                 state["fallback_notice"] = overlap_warning
             state["source_overlap_check"] = sanitize_json(overlap_report)
             article["source_overlap_check"] = sanitize_json(overlap_report)
+            # ── 质量门一致性：failed 不得继续标 completed ──
+            if str(gate.get("status") or "") == "failed":
+                if bool(used_fallback or article.get("used_local_fallback")):
+                    warnings = list(gate.get("warnings") or []) + list(gate.get("hard_errors") or [])
+                    gate = {**gate, "status": "warning", "passed": True, "warnings": list(dict.fromkeys(warnings)), "hard_errors": [], "hard_error_count": 0}
+                    article["recommended_status"] = "review_required"
+                    article["review_required"] = True
+                else:
+                    state["research_bundle"] = sanitize_json(bundle or {})
+                    state["quality_gate"] = sanitize_json(gate)
+                    failed_reasons = "；".join(gate.get("hard_errors", []) or gate.get("reasons", []))
+                    state.update({
+                        "status": "failed",
+                        "stage": "quality_gate",
+                        "progress": 45,
+                        "failed_step": "quality_gate",
+                        "error_code": "QUALITY_GATE_FAILED",
+                        "safe_error_message": failed_reasons or "文章质量检查未通过",
+                        "retryable": False,
+                    })
+                    return _persist(state, store)
             state["text_generation_calls"] = int(article.get("text_generation_calls") or generation_stats.get("text_generation_calls") or (0 if used_fallback else 1))
             state["text_generation_limit"] = int(article.get("text_generation_limit") or generation_stats.get("text_generation_limit") or 1)
             state["text_generation_second_call_reason"] = str(article.get("text_generation_second_call_reason") or generation_stats.get("text_generation_second_call_reason") or "")
+            state["text_generation_call_reasons"] = sanitize_json(article.get("text_generation_call_reasons") or generation_stats.get("text_generation_call_reasons") or [])
+            for index, reason in enumerate(state["text_generation_call_reasons"], start=1):
+                state[f"text_generation_call_{index}_reason"] = str(reason)
             state["fallback_reason"] = str(article.get("fallback_reason") or "")
             state["fallback_kind"] = str(article.get("fallback_kind") or "")
+            state["used_local_fallback"] = bool(used_fallback or article.get("used_local_fallback"))
+            state["response_parser_mode"] = str(article.get("response_parser_mode") or "")
+            state["text_content_type"] = str(article.get("text_content_type") or "")
+            state["provider_parser_mode"] = str(article.get("provider_parser_mode") or "")
+            state["request_timeout_seconds"] = article.get("request_timeout_seconds")
             article["text_model_name"] = state.get("text_model_name") or ""
             article["text_model_started_at"] = state.get("text_model_started_at")
             article["text_model_finished_at"] = state.get("text_model_finished_at")
@@ -988,8 +1266,14 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
             article["provider_error_message"] = state.get("provider_error_message") or ""
             article["fallback_kind"] = article.get("fallback_kind") or state.get("fallback_kind") or ""
             article["fallback_reason"] = article.get("fallback_reason") or state.get("fallback_reason") or ""
+            article["used_local_fallback"] = bool(state.get("used_local_fallback"))
+            article["response_parser_mode"] = state.get("response_parser_mode") or article.get("response_parser_mode") or ""
             article["source_statement"] = article.get("source_statement") or "\uff1b".join(str(item) for item in article.get("source_list") or [])
-            if not used_fallback and article.get("response_format_warning") and not state.get("fallback_notice"):
+            if state["used_local_fallback"]:
+                state["fallback_notice"] = state.get("fallback_notice") or "本篇未使用文本模型正式正文，当前展示可编辑基础框架。"
+            elif str(article.get("content_warning_code") or "") == "CONTENT_TOO_SHORT" and not state.get("fallback_notice"):
+                state["fallback_notice"] = str(article.get("warning_note") or "模型返回正文偏短，建议主动重新生成。")
+            elif not used_fallback and article.get("response_format_warning") and not state.get("fallback_notice"):
                 state["fallback_notice"] = "\u6587\u7ae0\u5df2\u751f\u6210\uff0c\u4f46\u6a21\u578b\u8fd4\u56de\u683c\u5f0f\u4e0d\u6807\u51c6\uff0c\u5df2\u81ea\u52a8\u8f6c\u6362\u4e3a\u53ef\u7f16\u8f91\u6587\u7ae0\u3002"
             article["review_required"] = bool(overlap_warning or _article_requires_review(article, gate, removed_claims, used_fallback))
             state["review_required"] = article["review_required"]

@@ -9,6 +9,7 @@ from typing import Any
 
 from modules.app_paths import PROJECT_ROOT, config_dir, ensure_user_data_dirs, settings_path
 from modules.credential_store import delete_secret, load_secret, save_secret
+from generation.image_budget import recommended_word_count
 
 
 ROOT = PROJECT_ROOT
@@ -92,7 +93,9 @@ def load_settings() -> dict[str, Any]:
         with SETTINGS_PATH.open("r", encoding="utf-8") as handle:
             raw_settings = json.load(handle)
             settings = _merge(DEFAULT_SETTINGS, raw_settings)
+        settings, word_count_migrated = _migrate_word_count_settings(settings)
         settings, migrated = _migrate_legacy_credentials(settings, raw_settings)
+        migrated = migrated or word_count_migrated
         if migrated:
             save_settings(settings)
             settings = _merge(DEFAULT_SETTINGS, json.loads(SETTINGS_PATH.read_text(encoding="utf-8")))
@@ -136,6 +139,17 @@ def _migrate_legacy_credentials(settings: dict[str, Any], raw_settings: dict[str
     result["credential_migration_notice"] = "旧版本单一密钥已复制为独立文本/图片凭据，请分别测试。"
     result["share_text_image_credentials"] = False
     return result, True
+
+
+def _migrate_word_count_settings(settings: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    result = json.loads(json.dumps(settings))
+    migrated = False
+    current = result.get("phase2a_word_count")
+    normalized = recommended_word_count(current)
+    if current != normalized:
+        result["phase2a_word_count"] = normalized
+        migrated = True
+    return result, migrated
 
 
 def save_settings(settings: dict[str, Any]) -> None:

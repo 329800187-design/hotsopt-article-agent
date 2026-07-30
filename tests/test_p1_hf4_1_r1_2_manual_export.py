@@ -11,9 +11,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import generation.single_task as single_task
+import api
 import modules.generation_store as generation_store
 from export.docx_exporter import export_article
 from export.zip_exporter import export_article_bundle
+from modules.generation_store import save_generation_task
 from modules.database import SQLiteStore
 from modules.models import HotTopic
 from providers.text_provider import ProviderError
@@ -197,3 +199,139 @@ def test_TEXT_KEY_LOAD_FAILED_WHEN_SAVED_KEY_FLAG_BUT_EMPTY_SECRET(tmp_path: Pat
     )
     assert result["status"] == "failed"
     assert result["error_code"] == "TEXT_KEY_LOAD_FAILED"
+
+
+def test_CUSTOM_TOPIC_SHORT_MODEL_OUTPUT_AUTO_EXPANDS_TO_FALLBACK_AND_WORD(tmp_path: Path, monkeypatch):
+    """主链：手动话题 + 模型返回短文(<700字) → 自动扩写 → completed/warning + article非空 + gate≠failed + Word可导出"""
+    topic = _manual_topic("r1-2-short-expand")
+    seen = {}
+
+    def fake_generate_short(topic, angle, article_type, style, word_count, profile, **kwargs):
+        seen["called"] = True
+        seen["api_key"] = profile.get("api_key")
+        # Simulate model returning a very short article (well under 700 chars)
+        return {
+            "title": f"{topic.title}的简短思考",
+            "intro": "AI赚钱是可行的。",
+            "summary": topic.summary,
+            "sections": [
+                {"heading": "核心概念", "body": "用AI赚钱就是卖服务。", "image_brief": "概念"},
+                {"heading": "方法", "body": "多尝试多学习。", "image_brief": "方法"},
+            ],
+            "content_markdown": f"# {topic.title}\n\nAI赚钱可行。\n\n## 核心概念\n用AI赚钱就是卖服务。\n\n## 方法\n多尝试多学习。",
+            "source_list": [],
+            "ai_statement": "AI辅助声明",
+            "fact_basis": [],
+            "recommended_status": "completed",
+            "text_generation_calls": 1,
+            "text_generation_limit": 1,
+        }
+
+    result = _run(tmp_path, monkeypatch, topic, fake_generate_short)
+    article = result["article"]
+    markdown = article["content_markdown"]
+
+    # Core invariants: must not fail
+    assert result["status"] in ("completed", "warning"), f"Expected completed/warning, got {result['status']}"
+    assert result["article"] is not None
+    assert result["quality_gate"]["status"] != "failed", f"Quality gate must not be failed: {result['quality_gate']}"
+
+    # Auto-expand evidence
+    assert result["fallback_kind"] == "custom_topic_expanded"
+    assert "BODY_TOO_SHORT_EXPANDED" in str(result.get("fallback_reason", "")) or "BODY_TOO_SHORT_EXPANDED" in str(article.get("fallback_reason", ""))
+    assert result["fallback_notice"]  # should have a notice about expansion
+
+    # Method article structure
+    assert "核心概念" in markdown
+    assert "可执行方法" in markdown
+    assert "具体步骤" in markdown
+    assert "风险提醒" in markdown
+    assert "总结" in markdown
+
+    # Body length >= 700
+    from generation.image_budget import count_body_chinese_chars
+    body_chars = count_body_chinese_chars(article)
+    assert body_chars >= 700, f"Expanded body must be >= 700, got {body_chars}"
+
+    # Word export
+    output = export_article(article, tmp_path / "short-expand.docx")
+    assert Document(output).paragraphs[0].text == article["title"]
+
+
+def _seed_export_state(tmp_path: Path, monkeypatch, *, task_status: str = "completed", article: dict | None = None, gate: dict | None = None):
+    monkeypatch.setattr(generation_store, "TASKS_ROOT", tmp_path / "tasks")
+    store = SQLiteStore(tmp_path / "export-gate.sqlite")
+    topic = _manual_topic("r1-2-export-gate")
+    task = _task(store, topic)
+    store.update_task_status(task["task_id"], task_status)
+    state = {
+        "task_id": task["task_id"],
+        "status": task_status,
+        "stage": task_status,
+        "state_version": 0,
+        "article": article if article is not None else _method_article(topic),
+        "quality_gate": gate if gate is not None else {"status": "passed", "passed": True, "hard_error_count": 0},
+    }
+    save_generation_task(state, allow_terminal_recovery=True)
+    monkeypatch.setattr(api, "store", store)
+    return task, state
+
+
+def test_FAILED_TASK_CANNOT_EXPORT_EMPTY_WORD(tmp_path: Path, monkeypatch):
+    task, _ = _seed_export_state(tmp_path, monkeypatch, task_status="failed")
+    try:
+        api._article_export(task["task_id"], "word")
+    except ProviderError as exc:
+        assert exc.code == "ARTICLE_NOT_READY"
+    else:
+        raise AssertionError("failed task must not export")
+    assert not list((tmp_path / "tasks").rglob("*.docx"))
+
+
+def test_EMPTY_BODY_MARKDOWN_CANNOT_EXPORT_WORD(tmp_path: Path, monkeypatch):
+    article = {"title": "空正文测试", "intro": "导语存在", "sections": [], "content_markdown": "# 空正文测试"}
+    task, _ = _seed_export_state(tmp_path, monkeypatch, article=article)
+    try:
+        api._article_export(task["task_id"], "word")
+    except ProviderError as exc:
+        assert exc.code == "ARTICLE_NOT_READY"
+    else:
+        raise AssertionError("empty article must not export")
+
+
+def test_NOT_CHECKED_QUALITY_GATE_CANNOT_EXPORT_WORD(tmp_path: Path, monkeypatch):
+    task, _ = _seed_export_state(tmp_path, monkeypatch, gate={"status": "not_checked", "hard_error_count": 0})
+    try:
+        api._article_export(task["task_id"], "word")
+    except ProviderError as exc:
+        assert exc.code == "ARTICLE_NOT_READY"
+    else:
+        raise AssertionError("not_checked gate must not export")
+
+
+def test_FAILED_QUALITY_GATE_CANNOT_EXPORT_WORD(tmp_path: Path, monkeypatch):
+    task, _ = _seed_export_state(tmp_path, monkeypatch, gate={"status": "failed", "hard_error_count": 1})
+    try:
+        api._article_export(task["task_id"], "word")
+    except ProviderError as exc:
+        assert exc.code == "ARTICLE_NOT_READY"
+    else:
+        raise AssertionError("failed gate must not export")
+
+
+def test_PASSED_ARTICLE_CAN_EXPORT_WORD(tmp_path: Path, monkeypatch):
+    task, _ = _seed_export_state(tmp_path, monkeypatch)
+    response = api._article_export(task["task_id"], "word")
+    assert Path(response.path).is_file()
+    assert Document(response.path).paragraphs[0].text
+
+
+def test_ZIP_DOES_NOT_INCLUDE_FAILED_EMPTY_WORD(tmp_path: Path, monkeypatch):
+    article = {"title": "空正文测试", "intro": "导语存在", "sections": [], "content_markdown": "# 空正文测试"}
+    task, _ = _seed_export_state(tmp_path, monkeypatch, task_status="failed", article=article, gate={"status": "not_checked"})
+    try:
+        api._article_export(task["task_id"], "zip")
+    except ProviderError as exc:
+        assert exc.code == "ARTICLE_NOT_READY"
+    else:
+        raise AssertionError("failed empty task must not export zip")

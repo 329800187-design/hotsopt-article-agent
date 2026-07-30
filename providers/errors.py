@@ -139,7 +139,7 @@ def map_provider_exception(exc: Exception, response: httpx.Response | None = Non
             500: "PROVIDER_INTERNAL_ERROR",
             502: "PROVIDER_INTERNAL_ERROR",
             503: "PROVIDER_INTERNAL_ERROR",
-            504: "PROVIDER_INTERNAL_ERROR",
+            504: "TIMEOUT",
         }
         return ProviderError(mapping.get(status, "NETWORK_ERROR"), f"provider returned HTTP {status}")
     if isinstance(exc, (ValueError, TypeError, KeyError, IndexError, AttributeError, binascii.Error, json.JSONDecodeError)):

@@ -33,7 +33,7 @@ def create_http_client(network_settings: dict[str, Any] | None = None) -> httpx.
 
 
 def sanitize_proxy_url(value: str) -> str:
-    return re.sub(r"(https://)([^/@:]+):([^/@]+)@", r"\1***:***@", str(value or ""))
+    return re.sub(r"(https?://)([^/@:]+):([^/@]+)@", r"\1***:***@", str(value or ""))
 
 
 def classify_network_error(error: Exception) -> dict[str, Any]:

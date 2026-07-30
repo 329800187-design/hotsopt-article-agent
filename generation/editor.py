@@ -63,10 +63,20 @@ def _read_editing_article(task_id: str, state: dict[str, Any] | None = None) -> 
 
 def _markdown(article: dict[str, Any]) -> str:
     title = str(article.get("title") or "未命名文章").strip()
-    intro = str(article.get("intro") or article.get("summary") or "").strip()
+    intro = str(article.get("lead") or article.get("intro") or article.get("summary") or "").strip()
     chunks = [f"# {title}"]
     if intro:
         chunks.extend(["", intro])
+    for section in article.get("sections") or []:
+        heading = str(section.get("heading") or "").strip()
+        body = str(section.get("body") or "").strip()
+        if heading or body:
+            chunks.extend(["", f"## {heading}", body])
+    return "\n".join(chunks).strip() + "\n"
+
+
+def _body_markdown(article: dict[str, Any]) -> str:
+    chunks: list[str] = []
     for section in article.get("sections") or []:
         heading = str(section.get("heading") or "").strip()
         body = str(section.get("body") or "").strip()
@@ -84,10 +94,12 @@ def _normalise_article_changes(current: dict[str, Any], changes: dict[str, Any])
         article["title"] = title
     if "intro" in changes:
         article["intro"] = str(changes.get("intro") or "").strip()
+        article["lead"] = article["intro"]
         article["summary"] = article["intro"]
     if "summary" in changes and "intro" not in changes:
         article["summary"] = str(changes.get("summary") or "").strip()
         article["intro"] = article["summary"]
+        article["lead"] = article["summary"]
     if "sections" in changes:
         sections = changes.get("sections")
         if not isinstance(sections, list):
@@ -107,6 +119,7 @@ def _normalise_article_changes(current: dict[str, Any], changes: dict[str, Any])
             raise ValueError("正文至少需要一个小节")
         article["sections"] = clean_sections
     article["content_markdown"] = _markdown(article)
+    article["body_markdown"] = _body_markdown(article)
     article["updated_at"] = utc_now()
     return sanitize_sensitive_data(article)
 

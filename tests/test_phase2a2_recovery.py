@@ -130,6 +130,14 @@ def test_stale_running_api_task_is_recovered_before_run(tmp_path, monkeypatch):
     store, task = make_task(tmp_path)
     running_state(store, task, "generating_article")
     monkeypatch.setattr(api, "store", store)
+    monkeypatch.setattr(api, "load_settings", lambda: {
+        "text_profile": {"model": "text-model", "base_url": "https://example.invalid/v1", "endpoint": "/chat/completions"},
+        "image_profile": {},
+        "network": {},
+        "verified_text_model": "text-model",
+        "verified_text_base_url": "https://example.invalid/v1",
+        "verified_text_endpoint": "/chat/completions",
+    })
 
     class IdleExecutor:
         def is_running(self, task_id):
@@ -173,8 +181,8 @@ def test_api_persists_generation_options_and_rejects_invalid_values(tmp_path, mo
     invalid = dict(payload)
     invalid["generation_options"] = {**payload["generation_options"], "word_count": 999}
     invalid_response = client.post("/api/tasks", json=invalid)
-    assert invalid_response.status_code == 422
-    assert invalid_response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert invalid_response.status_code == 201
+    assert invalid_response.json()["data"]["generation_options"]["word_count"] == 1200
 
 
 def test_background_generation_uses_persisted_options(tmp_path, monkeypatch):
@@ -182,9 +190,18 @@ def test_background_generation_uses_persisted_options(tmp_path, monkeypatch):
     import modules.generation_store as generation_store
 
     monkeypatch.setattr(generation_store, "TASKS_ROOT", tmp_path / "tasks")
-    options = {"article_type": "社会民生", "style": "专业分析", "image_style": "二维国漫新闻插画", "word_count": 1200}
+    options = {"article_type": "社会民生", "style": "专业分析", "image_style": "二维国漫新闻插画", "word_count": 1200, "image_plan_mode": "standard", "image_generation_requested": True}
     store, task = make_task(tmp_path, options)
-    monkeypatch.setattr(single_task, "generate_article", lambda *args, **kwargs: {"title": "标题", "intro": "摘要", "sections": [{"heading": "事实", "body": "正文", "image_brief": "现场"}], "content_markdown": "# 标题", "demo_mode": False})
+    body = (
+        "根据现有公开资料，文章先交代已经确认的信息，再说明仍待核实的内容。"
+        "读者可以通过来源、时间和主体进行交叉核验，也要注意传播风险和背景原因。"
+    )
+    sections = [
+        {"heading": "事实梳理", "body": body * 5, "image_brief": "现场"},
+        {"heading": "影响分析", "body": body * 5, "image_brief": "现场"},
+        {"heading": "后续关注", "body": body * 5, "image_brief": "现场"},
+    ]
+    monkeypatch.setattr(single_task, "generate_article", lambda *args, **kwargs: {"title": "标题", "intro": "这是一段结构完整的测试导语，用来确认持久化选项会进入后台生成。", "sections": sections, "content_markdown": "# 标题\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections), "demo_mode": False})
 
     class FakeImageProvider:
         last_response_type = "base64"

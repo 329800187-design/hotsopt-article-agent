@@ -78,9 +78,45 @@ _CHINESE_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def count_body_chinese_chars(article: dict[str, Any]) -> int:
-    intro = str(article.get("intro") or "")
-    section_bodies = "\n".join(str(section.get("body") or "") for section in article.get("sections") or [] if isinstance(section, dict))
-    return len(_CHINESE_RE.findall(f"{intro}\n{section_bodies}"))
+    """Count visible Chinese body chars with one production-wide definition.
+
+    Includes lead/intro plus section bodies. Excludes title, section headings,
+    markdown markers, source lists, URLs, keywords, AI statements, and punctuation.
+    """
+    lead = str(article.get("lead") or article.get("intro") or "")
+    section_bodies = "\n".join(
+        str(section.get("body") or "")
+        for section in article.get("sections") or []
+        if isinstance(section, dict)
+    )
+    if lead or section_bodies.strip():
+        return len(_CHINESE_RE.findall(f"{lead}\n{section_bodies}"))
+    return len(_CHINESE_RE.findall(_legacy_body_markdown(article.get("content_markdown") or "")))
+
+
+def _legacy_body_markdown(markdown: Any) -> str:
+    """Recover body text for older saved articles that predate structured sections."""
+    lines: list[str] = []
+    in_body = False
+    skip_section = False
+    for raw_line in str(markdown or "").replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.match(r"^#\s+", line):
+            continue
+        h2 = re.match(r"^#{2,6}\s*(.+)$", line)
+        if h2:
+            heading = h2.group(1).strip()
+            skip_section = bool(re.search(r"资料来源|参考资料|来源|AI|声明|关键词|标签", heading, re.I))
+            in_body = not skip_section
+            continue
+        if skip_section or re.search(r"https?://|原文链接|AI辅助|生成声明|免责声明", line, re.I):
+            continue
+        if not in_body:
+            in_body = True
+        lines.append(re.sub(r"[*_`>\-\[\]()]+", "", line))
+    return "\n".join(lines)
 
 
 def recommended_word_count(target: Any) -> int:
@@ -88,10 +124,8 @@ def recommended_word_count(target: Any) -> int:
         value = int(target or 0)
     except (TypeError, ValueError):
         value = 0
-    if value <= 0:
-        return 800
-    if value < 700:
-        return 700
-    if value > 1600:
+    if value >= 1600:
         return 1600
-    return value
+    if value >= 1500:
+        return 1500
+    return 1200

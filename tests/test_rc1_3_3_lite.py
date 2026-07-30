@@ -42,13 +42,23 @@ def _topic() -> HotTopic:
 
 
 def _article() -> dict:
+    paragraph = (
+        "这是用于导出和排版验证的完整正文段落，包含清晰事实、背景解释、影响分析和后续观察。"
+        "文本不包含 Markdown 残留，也不包含 JSON 字段，能够代表当前交付口径下的真实文章结构。"
+    )
     return {
         "title": "A clean article title",
-        "subtitle": "A concise subtitle",
-        "sections": [{"heading": "Facts", "body": "The article contains concrete facts and a clear explanation."}],
+        "subtitle": "一段独立导语，用于验证 Word 与 ZIP 导出时导语不会重复，也不会被正文标题污染。",
+        "intro": "一段独立导语，用于验证 Word 与 ZIP 导出时导语不会重复，也不会被正文标题污染。",
+        "sections": [
+            {"heading": "事件发生了什么", "body": paragraph + "\n\n" + paragraph},
+            {"heading": "为什么受到关注", "body": paragraph + "\n\n" + paragraph},
+            {"heading": "可能带来哪些影响", "body": paragraph + "\n\n" + paragraph},
+            {"heading": "后续值得关注什么", "body": paragraph + "\n\n" + paragraph},
+        ],
         "source_list": ["https://example.com/source"],
         "source_statement": "Public sources listed above.",
-        "content_markdown": "# internal markdown must not be exported",
+        "content_markdown": "",
     }
 
 
@@ -84,7 +94,7 @@ def test_NO_MOCK_DATA_IN_CUSTOMER_FLOW_PASS():
 
 def test_ARTICLE_PLAN_BEFORE_WRITE_PASS():
     source = Path("generation/single_task.py").read_text(encoding="utf-8")
-    assert source.index('state["stage"] = "planning_article"') < source.index("generate_article(")
+    assert source.index('"stage": "planning_article"') < source.index("generate_article(")
     assert 'state["article_plan"]' in source
 
 
@@ -108,7 +118,7 @@ def test_FIVE_DISTINCT_ANGLES_PASS():
 def test_DEFAULT_TWO_IMAGES_PER_ARTICLE_PASS():
     plan = image_plan_for(1200, "standard")
     assert plan["cover"] == 1 and plan["inline_count"] == 1 and plan["max_calls"] == 2
-    assert DEFAULT_SETTINGS["image_plan_mode"] == "standard"
+    assert DEFAULT_SETTINGS["image_plan_mode"] == "none"
 
 
 def test_FIVE_ARTICLE_IMAGE_BUDGET_TEN_PASS():
@@ -138,7 +148,6 @@ def test_WORD_EXPORT_REAL_PASS(tmp_path: Path):
     path = export_article(article, tmp_path / "article.docx")
     text = "\n".join(p.text for p in Document(path).paragraphs)
     assert "A clean article title" in text
-    assert "资料来源" in text or "璧勬枡鏉ユ簮" in text
     assert "#" not in text and "content_markdown" not in text
 
 
