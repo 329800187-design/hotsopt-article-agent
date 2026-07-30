@@ -1,1 +1,1 @@
-python -m compileall providers generation modules ui
+python -m pytest tests/test_image_provider_async.py -q --tb=short

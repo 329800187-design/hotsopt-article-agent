@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from PIL import Image
@@ -83,6 +83,47 @@ def normalize_image_size(size: Any, api_format: str | None = None) -> str:
     return value.replace("*", "x")
 
 
+def normalize_endpoint_url(base_url: Any, endpoint: Any) -> str:
+    """Join provider URLs without duplicating a shared version path."""
+    base = str(base_url or "").strip().rstrip("/")
+    target = "/" + str(endpoint or "").strip().lstrip("/")
+    parsed = urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ProviderError("MODEL_NOT_CONFIGURED", "image model base URL is invalid")
+    base_parts = [part for part in parsed.path.split("/") if part]
+    endpoint_parts = [part for part in target.split("/") if part]
+    overlap = 0
+    for length in range(min(len(base_parts), len(endpoint_parts)), 0, -1):
+        if base_parts[-length:] == endpoint_parts[:length]:
+            overlap = length
+            break
+    path = "/" + "/".join(base_parts + endpoint_parts[overlap:])
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
+
+
+def build_image_request_payload(profile: dict[str, Any], prompt: str) -> dict[str, Any]:
+    adapter = str(profile.get("request_adapter") or "").strip()
+    if not adapter:
+        adapter = "dashscope_multimodal_generation" if str(profile.get("api_format") or "").lower() == "dashscope_native" else "openai_images_generations"
+    if adapter == "dashscope_multimodal_generation":
+        return {
+            "model": profile.get("model"),
+            "input": {"messages": [{"role": "user", "content": [{"text": prompt}]}]},
+            "parameters": {
+                "watermark": False,
+                "size": normalize_image_size(profile.get("size"), "dashscope_native"),
+            },
+        }
+    if adapter == "openai_images_generations":
+        return {
+            "model": profile.get("model"),
+            "prompt": prompt,
+            "size": normalize_image_size(profile.get("size"), "openai_compatible"),
+            "n": 1,
+        }
+    raise ProviderError("INVALID_REQUEST", f"unsupported image request adapter: {adapter}")
+
+
 def inspect_image(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ProviderError("INVALID_RESPONSE", "image file was not created")
@@ -150,24 +191,10 @@ class OpenAIImageProvider:
         endpoint = str(self.profile.get("endpoint") or "/images/generations")
         if not base_url:
             raise ProviderError("MODEL_NOT_CONFIGURED", "image model base URL is missing")
-        url = f"{base_url}/{endpoint.lstrip('/')}"
-        native_dashscope = str(self.profile.get("api_format") or "").lower() == "dashscope_native"
-        if native_dashscope:
-            payload = {
-                "model": self.profile.get("model"),
-                "input": {
-                    "messages": [{
-                        "role": "user",
-                        "content": [{"text": request.prompt}],
-                    }]
-                },
-                "parameters": {
-                    "watermark": False,
-                    "size": normalize_image_size(self.profile.get("size"), "dashscope_native"),
-                },
-            }
-        else:
-            payload = {"model": self.profile.get("model"), "prompt": request.prompt, "size": normalize_image_size(self.profile.get("size"), "openai_compatible"), "n": 1}
+        url = normalize_endpoint_url(base_url, endpoint)
+        response_adapter = str(self.profile.get("response_adapter") or "")
+        native_dashscope = response_adapter == "dashscope_image_or_openai_image" or str(self.profile.get("api_format") or "").lower() == "dashscope_native"
+        payload = build_image_request_payload(self.profile, request.prompt)
         response: httpx.Response | None = None
         try:
             self.generation_calls += 1

@@ -2,11 +2,11 @@
 
 Current branch: `fix/r1.3-customer-delivery-final`
 
-Current HEAD: `9e5e98af7650379ef5b2dfb213c2e3eef4e8d552`
+Current HEAD: pending `fix: complete image provider request adapters` commit
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
-Current phase: P0-C2 image request, async execution, two-image lifecycle and export closure
+Current phase: P0-C2 asynchronous image task polling
 
 ## Completed
 
@@ -18,6 +18,7 @@ Current phase: P0-C2 image request, async execution, two-image lifecycle and exp
 - Moved default text/image provider profile generation to `modules/config_store.py`.
 - Moved UI provider preset source to Registry via `ui/rc1_app.py`.
 - Added image response adapter support for OpenAI `b64_json`, URL fetch, plain base64 fields, Data URI payloads, Dashscope native `image`, and post-write raster validation.
+- Wired Registry request/response adapters into image runtime profiles and prevented duplicated version paths such as `/v1/v1/images/generations`.
 - P1 API integration blocker previously resolved: `4 passed, 6 deselected`.
 - Production license gate tests previously rerun: `12 passed`.
 - Security scan previous result: `SECURITY_SCAN_PASS`.
@@ -35,7 +36,7 @@ Current phase: P0-C2 image request, async execution, two-image lifecycle and exp
 
 - `compileall`: PASS on `providers`, `generation`, `modules`, `ui`, and new provider tests.
 - P0-A Registry/config targeted: `16 passed`.
-- P0-C image adapter/provider targeted: `16 passed` including provider registry and image budget smoke.
+- P0-C image adapter/provider targeted: `18 passed` including provider registry and image budget smoke.
 - Article/research targeted after Provider Registry: `57 passed`.
 - RC: last known `307 passed, 2 skipped`.
 - P1 non-API: last known `258 passed, 4 deselected`.
@@ -52,7 +53,7 @@ Current phase: P0-C2 image request, async execution, two-image lifecycle and exp
 
 ## Next Command
 
-`python -m compileall providers generation modules ui`
+`python -m pytest tests/test_image_provider_async.py -q --tb=short`
 
 ## Gates
 

@@ -16,6 +16,7 @@ REQUIRED_FIELDS = {
     "response_adapter",
     "supports_sync",
     "supports_async_polling",
+    "polling_strategy",
 }
 
 
@@ -29,6 +30,7 @@ def test_registry_profiles_have_required_delivery_fields():
         assert payload["provider_id"]
         assert isinstance(payload["supports_sync"], bool)
         assert isinstance(payload["supports_async_polling"], bool)
+        assert payload["polling_strategy"]
 
 
 def test_registry_supports_required_text_providers():

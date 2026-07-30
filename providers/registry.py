@@ -21,6 +21,7 @@ class ProviderProfile:
     response_adapter: str
     supports_sync: bool
     supports_async_polling: bool
+    polling_strategy: str = "none"
     api_format: str = "openai_compatible"
     default_size: str = ""
 
@@ -33,6 +34,10 @@ class ProviderProfile:
             "auth_type": self.auth_strategy,
             "model": self.default_model,
             "api_format": self.api_format,
+            "request_adapter": self.request_adapter,
+            "response_adapter": self.response_adapter,
+            "sync_or_async": "async" if self.supports_async_polling and not self.supports_sync else "sync",
+            "polling_strategy": self.polling_strategy,
         }
         if self.default_size:
             profile["size"] = self.default_size
@@ -201,6 +206,7 @@ _PROFILES: tuple[ProviderProfile, ...] = (
         response_adapter="image_url_b64_data_uri",
         supports_sync=True,
         supports_async_polling=True,
+        polling_strategy="generic_task_status",
         default_size="1024x1024",
     ),
 )
@@ -241,4 +247,3 @@ def ui_presets() -> dict[str, dict[str, dict[str, Any]]]:
             if profile:
                 result[name][capability] = profile.to_runtime_profile()
     return result
-

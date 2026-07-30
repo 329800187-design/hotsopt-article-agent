@@ -10,7 +10,7 @@ from PIL import Image
 
 from providers.contracts import ImageGenerationRequest
 from providers.text_provider import ProviderError
-from providers.image_provider import OpenAIImageProvider
+from providers.image_provider import OpenAIImageProvider, build_image_request_payload, normalize_endpoint_url
 
 
 def _png_bytes() -> bytes:
@@ -112,3 +112,21 @@ def test_html_or_json_bytes_are_rejected(monkeypatch: pytest.MonkeyPatch, tmp_pa
     with pytest.raises(ProviderError) as excinfo:
         provider.generate_image(ImageGenerationRequest("prompt", tmp_path / "out.png"))
     assert excinfo.value.code == "INVALID_RESPONSE"
+
+
+def test_endpoint_normalization_does_not_duplicate_version_path() -> None:
+    assert normalize_endpoint_url("https://image.example/v1", "/v1/images/generations") == "https://image.example/v1/images/generations"
+    assert normalize_endpoint_url("https://image.example/api/v3", "/images/generations") == "https://image.example/api/v3/images/generations"
+
+
+def test_request_adapter_controls_native_dashscope_payload() -> None:
+    payload = build_image_request_payload(
+        {
+            "request_adapter": "dashscope_multimodal_generation",
+            "model": "qwen-image",
+            "size": "1024x1024",
+        },
+        "正文配图",
+    )
+    assert payload["input"]["messages"][0]["content"] == [{"text": "正文配图"}]
+    assert payload["parameters"]["size"] == "1024*1024"
