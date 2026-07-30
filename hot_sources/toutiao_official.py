@@ -73,11 +73,15 @@ class ToutiaoOfficialSource(HotProvider):
     def fetch_trends(self) -> list[HotTopic]:
         with create_http_client({**self.network_settings, "timeout_seconds": self.timeout_seconds}) as client:
             response = client.get(self.url, headers={"User-Agent": "Mozilla/5.0 hotspot-article-agent/0.1", "Accept": "text/html"})
+            self.last_http_status = response.status_code
+            self.last_content_type = str(response.headers.get("content-type") or "")
             response.raise_for_status()
             page = response.text
         captured_at = datetime.now(timezone.utc).isoformat()
         topics: list[HotTopic] = []
-        for index, item in enumerate(self._items(page), start=1):
+        raw_items = self._items(page)
+        self.last_raw_item_count = len(raw_items)
+        for index, item in enumerate(raw_items, start=1):
             topic = self.normalize_item(item, index, captured_at)
             if topic:
                 topics.append(topic)

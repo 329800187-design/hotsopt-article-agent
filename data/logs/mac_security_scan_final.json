@@ -1,7 +1,7 @@
 {
   "root": "/Users/mac/Documents/Codex/2026-07-31/xian/hotsopt-article-agent-api",
-  "files_scanned": 339,
-  "binary_files_scanned": 10,
+  "files_scanned": 353,
+  "binary_files_scanned": 17,
   "allowed_hits": [
     {
       "path": "desktop_host.py",

@@ -19,6 +19,8 @@ def test_overview_parser_keeps_independent_board_identity(monkeypatch):
 
     class Response:
         text = page
+        status_code = 200
+        headers = {"content-type": "text/html; charset=utf-8"}
 
         def raise_for_status(self):
             return None

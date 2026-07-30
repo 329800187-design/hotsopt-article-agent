@@ -57,11 +57,15 @@ class DailyHotSource(HotProvider):
     def fetch_trends(self) -> list[HotTopic]:
         with create_http_client({**self.network_settings, "timeout_seconds": self.timeout_seconds}) as client:
             response = client.get(self.endpoint, headers={"User-Agent": "Mozilla/5.0 hotspot-article-agent/0.1", "Accept": "application/json"})
+            self.last_http_status = response.status_code
+            self.last_content_type = str(response.headers.get("content-type") or "")
             response.raise_for_status()
             payload = response.json()
+        raw_items = self._items(payload)
+        self.last_raw_item_count = len(raw_items)
         topics: list[HotTopic] = []
         collected_at = datetime.now(timezone.utc).isoformat()
-        for index, item in enumerate(self._items(payload), start=1):
+        for index, item in enumerate(raw_items, start=1):
             topic = self.normalize_item(item, index, collected_at)
             if topic:
                 topics.append(topic)

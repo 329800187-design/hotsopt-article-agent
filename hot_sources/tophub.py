@@ -72,6 +72,8 @@ class TopHubToutiaoSource(HotProvider):
     def fetch_trends(self) -> list[HotTopic]:
         with create_http_client({**self.network_settings, "timeout_seconds": self.timeout_seconds}) as client:
             response = client.get(self.endpoint, headers={"User-Agent": "Mozilla/5.0 hotspot-article-agent/0.1", "Accept": "text/html"})
+            self.last_http_status = response.status_code
+            self.last_content_type = str(response.headers.get("content-type") or "")
             response.raise_for_status()
             text = response.text
         captured_at = datetime.now(timezone.utc).isoformat()
@@ -82,6 +84,7 @@ class TopHubToutiaoSource(HotProvider):
                 topics.append(topic)
         if not topics:
             raise ValueError("TopHub 页面返回成功，但没有识别到热榜条目")
+        self.last_raw_item_count = len(topics)
         self.last_success_at = captured_at
         self.last_error = None
         return topics
@@ -159,6 +162,8 @@ class TopHubOverviewSource(HotProvider):
     def fetch_trends(self) -> list[HotTopic]:
         with create_http_client({**self.network_settings, "timeout_seconds": self.timeout_seconds}) as client:
             response = client.get(self.endpoint, headers={"User-Agent": "Mozilla/5.0 hotspot-article-agent/0.1", "Accept": "text/html"})
+            self.last_http_status = response.status_code
+            self.last_content_type = str(response.headers.get("content-type") or "")
             response.raise_for_status()
             page = response.text
         captured_at = datetime.now(timezone.utc).isoformat()
@@ -205,6 +210,7 @@ class TopHubOverviewSource(HotProvider):
                 break
         if not topics:
             raise ValueError("TopHub 首页返回成功，但没有识别到多平台榜单条目")
+        self.last_raw_item_count = len(topics)
         self.last_success_at = captured_at
         self.last_error = None
         return topics

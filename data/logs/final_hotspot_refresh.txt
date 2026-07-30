@@ -1,30 +1,30 @@
 status=online
-captured_at=2026-07-30T20:43:42.103854+00:00
+captured_at=2026-07-30T20:48:26.929851+00:00
 pre_dedupe_live_topics=431
 deduplicated_live_topics=200
 topics_with_url_or_identifier=200
 topics_with_captured_at=200
 cached_topic_count=0
-elapsed_ms=12504
+elapsed_ms=12005
 
 provider diagnostics:
-provider_name=toutiao_official | request_url=https://www.toutiao.com/hot-event/hot-board/origin=toutiao_pc | http_status=404 | content_type=text/plain; charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=156 | failure_code=HTTP_404 | failure_message=Client error '404 Not Found' for url 'https://www.toutiao.com/hot-event/hot-board/origin=toutiao_pc'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404 | captured_at=2026-07-30T20:43:37.753828+00:00
-provider_name=toutiao | request_url=https://api-hot.imsyy.top/toutiao | http_status=0 | content_type= | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=2037 | failure_code=TLS_ERROR | failure_message=[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1082) | captured_at=2026-07-30T20:43:39.793404+00:00
-provider_name=newsnow_toutiao | request_url=https://newsnow.busiyi.world/api/sid=toutiao&latest | http_status=0 | content_type= | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=703 | failure_code=NON_JSON_RESPONSE | failure_message=Expecting value: line 1 column 1 (char 0) | captured_at=2026-07-30T20:43:40.499299+00:00
-provider_name=tophub_overview | request_url=https://tophub.today/ | http_status=200 | content_type= | raw_item_count=500 | normalized_item_count=500 | deduplicated_item_count=431 | elapsed_ms=3590 | failure_code= | failure_message= | captured_at=2026-07-30T20:43:42.103854+00:00
-provider_name=tophub_toutiao | request_url=https://tophub.today/n/x9ozB4KoXb | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=672 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/x9ozB4KoXb'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:43:44.765858+00:00
-provider_name=tophub_weibo | request_url=https://tophub.today/n/KqndgxeLl9 | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=683 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/KqndgxeLl9'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:43:45.451960+00:00
-provider_name=tophub_zhihu | request_url=https://tophub.today/n/mproPpoq6O | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=687 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/mproPpoq6O'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:43:46.141202+00:00
-provider_name=tophub_baidu | request_url=https://tophub.today/n/Jb0vmloB1G | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=663 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/Jb0vmloB1G'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:43:46.807136+00:00
-provider_name=tophub_bilibili | request_url=https://tophub.today/n/74KvxwokxM | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=664 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/74KvxwokxM'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:43:47.473379+00:00
-provider_name=tophub_douyin | request_url=https://tophub.today/n/DpQvNABoNE | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=678 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/DpQvNABoNE'
-For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:43:48.153490+00:00
+provider_name=toutiao_official | request_url=https://www.toutiao.com/hot-event/hot-board/origin=toutiao_pc | http_status=404 | content_type=text/plain; charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=149 | failure_code=HTTP_404 | failure_message=Client error '404 Not Found' for url 'https://www.toutiao.com/hot-event/hot-board/origin=toutiao_pc'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404 | captured_at=2026-07-30T20:48:23.308941+00:00
+provider_name=toutiao | request_url=https://api-hot.imsyy.top/toutiao | http_status=0 | content_type= | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=1363 | failure_code=TLS_ERROR | failure_message=[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1082) | captured_at=2026-07-30T20:48:24.673980+00:00
+provider_name=newsnow_toutiao | request_url=https://newsnow.busiyi.world/api/sid=toutiao&latest | http_status=0 | content_type= | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=670 | failure_code=NON_JSON_RESPONSE | failure_message=Expecting value: line 1 column 1 (char 0) | captured_at=2026-07-30T20:48:25.347621+00:00
+provider_name=tophub_overview | request_url=https://tophub.today/ | http_status=200 | content_type=text/html;charset=utf-8 | raw_item_count=500 | normalized_item_count=500 | deduplicated_item_count=431 | elapsed_ms=3510 | failure_code= | failure_message= | captured_at=2026-07-30T20:48:26.929851+00:00
+provider_name=tophub_toutiao | request_url=https://tophub.today/n/x9ozB4KoXb | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=781 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/x9ozB4KoXb'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:48:29.642016+00:00
+provider_name=tophub_weibo | request_url=https://tophub.today/n/KqndgxeLl9 | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=778 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/KqndgxeLl9'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:48:30.422560+00:00
+provider_name=tophub_zhihu | request_url=https://tophub.today/n/mproPpoq6O | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=690 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/mproPpoq6O'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:48:31.115214+00:00
+provider_name=tophub_baidu | request_url=https://tophub.today/n/Jb0vmloB1G | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=682 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/Jb0vmloB1G'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:48:31.799479+00:00
+provider_name=tophub_bilibili | request_url=https://tophub.today/n/74KvxwokxM | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=675 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/74KvxwokxM'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:48:32.477469+00:00
+provider_name=tophub_douyin | request_url=https://tophub.today/n/DpQvNABoNE | http_status=403 | content_type=text/html;charset=utf-8 | raw_item_count=0 | normalized_item_count=0 | deduplicated_item_count=0 | elapsed_ms=696 | failure_code=HTTP_403 | failure_message=Client error '403 Forbidden' for url 'https://tophub.today/n/DpQvNABoNE'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | captured_at=2026-07-30T20:48:33.175538+00:00
 
 gates:
 deduplicated_live_topics_gte_200=True
