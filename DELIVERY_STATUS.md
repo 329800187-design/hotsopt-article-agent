@@ -2,11 +2,11 @@
 
 Current branch: `fix/r1.3-customer-delivery-final`
 
-Current HEAD: `f449c33` plus uncommitted P0-C image response adapter changes pending commit.
+Current HEAD: `9e5e98af7650379ef5b2dfb213c2e3eef4e8d552`
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
-Current phase: P0-C image response adapter implemented and locally validated.
+Current phase: P0-C2 image request, async execution, two-image lifecycle and export closure
 
 ## Completed
 
@@ -30,7 +30,6 @@ Current phase: P0-C image response adapter implemented and locally validated.
 - Final installed Windows customer flow: install, launch, activation, model setup, article+image generation, Word/ZIP export, restart recovery, uninstall.
 - Final Setup and customer delivery ZIP.
 - Final full test suite run after all delivery changes.
-- Push of `fix/r1.3-customer-delivery-final` after latest P0-C commit.
 
 ## Recent Test Results
 
@@ -53,7 +52,7 @@ Current phase: P0-C image response adapter implemented and locally validated.
 
 ## Next Command
 
-`python -m pytest tests/test_image_provider_response_adapters.py tests/test_provider_registry_delivery.py tests/test_p1_hf1_targeted.py -q --tb=short`
+`python -m compileall providers generation modules ui`
 
 ## Gates
 

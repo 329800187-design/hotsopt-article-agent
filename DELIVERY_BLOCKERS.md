@@ -10,8 +10,9 @@
 2. Full customer delivery closure has not been executed from an installed Windows build.
    - Required: install, desktop launch, activation, text model test, image model test, hotspot refresh, article+two-image generation, Word export, ZIP export, restart recovery, uninstall.
 
-3. Provider Registry P0-A is not implemented.
-   - Text/image profiles are not yet fully data-driven through a registry with explicit adapters.
+3. Provider Registry first implementation completed.
+   - Remaining work is request-side provider adaptation, async image execution,
+     two-image task lifecycle, real image smoke and final delivery closure.
 
 4. Image generation closure P0-C is not verified.
    - Need two real images, file validation, retry isolation, and image result consistency.

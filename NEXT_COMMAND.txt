@@ -1,1 +1,1 @@
-python -m pytest tests/test_image_provider_response_adapters.py tests/test_provider_registry_delivery.py tests/test_p1_hf1_targeted.py -q --tb=short
+python -m compileall providers generation modules ui
