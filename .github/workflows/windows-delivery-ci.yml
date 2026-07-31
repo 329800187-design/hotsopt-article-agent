@@ -198,6 +198,16 @@ jobs:
           $ErrorActionPreference = "Stop"
           $env:HOTSPOT_RUNTIME_SOURCE = python -c "import sys; print(sys.base_prefix)"
           $env:HOTSPOT_RUNTIME_SITE_PACKAGES = python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+          $webview = "packaging/assets/MicrosoftEdgeWebView2Setup.exe"
+          New-Item -ItemType Directory -Force (Split-Path $webview) | Out-Null
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $webview
+          $signature = [System.IO.File]::ReadAllBytes($webview)[0..1]
+          if ($signature[0] -ne 0x4D -or $signature[1] -ne 0x5A) {
+            throw "WEBVIEW2_BOOTSTRAPPER_INVALID"
+          }
+          Get-FileHash -Algorithm SHA256 $webview |
+            Format-List | Out-String |
+            Set-Content -Encoding UTF8 artifacts/windows-ci/webview2-bootstrapper.txt
           python scripts/build_rc1_3_3_lite_r2_2_7.py 2>&1 | Tee-Object -FilePath artifacts/windows-ci/inno-build.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $setups = @(Get-ChildItem -Path . -File -Filter *_Setup.exe)
