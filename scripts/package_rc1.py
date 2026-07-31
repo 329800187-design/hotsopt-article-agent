@@ -38,8 +38,10 @@ REQUIRED_RUNTIME_ENTRIES = (
     "runtime/DLLs/_socket.pyd",
     "runtime/DLLs/_ssl.pyd",
     "runtime/DLLs/_hashlib.pyd",
-    "runtime/DLLs/libcrypto-3-x64.dll",
-    "runtime/DLLs/libssl-3-x64.dll",
+)
+REQUIRED_RUNTIME_ENTRY_GROUPS = (
+    ("runtime/DLLs/libcrypto-3-x64.dll", "runtime/DLLs/libcrypto-3.dll"),
+    ("runtime/DLLs/libssl-3-x64.dll", "runtime/DLLs/libssl-3.dll"),
 )
 
 
@@ -128,6 +130,11 @@ def _add_bundled_runtime(entries: dict[str, bytes]) -> None:
 
 def _validate_required_runtime_entries(entries: dict[str, bytes]) -> None:
     missing = [name for name in REQUIRED_RUNTIME_ENTRIES if name not in entries]
+    missing.extend(
+        " or ".join(group)
+        for group in REQUIRED_RUNTIME_ENTRY_GROUPS
+        if not any(name in entries for name in group)
+    )
     if missing:
         raise RuntimeError("RUNTIME_PACKAGE_INCOMPLETE: missing " + ", ".join(missing))
 
@@ -140,6 +147,11 @@ def _smoke_test_packaged_runtime(windows_zip: Path) -> None:
         with zipfile.ZipFile(windows_zip) as archive:
             required = set(REQUIRED_RUNTIME_ENTRIES)
             missing = [name for name in required if name not in archive.namelist()]
+            missing.extend(
+                " or ".join(group)
+                for group in REQUIRED_RUNTIME_ENTRY_GROUPS
+                if not any(name in archive.namelist() for name in group)
+            )
             if missing:
                 raise RuntimeError("RUNTIME_ZIP_INCOMPLETE: missing " + ", ".join(sorted(missing)))
             for name in archive.namelist():

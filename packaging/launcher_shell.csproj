@@ -8,6 +8,7 @@
     <RootNamespace>HotspotArticleAgent</RootNamespace>
     <ApplicationIcon>..\ui\assets\brand.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\scripts\launcher_shell.cs" Link="launcher_shell.cs" />

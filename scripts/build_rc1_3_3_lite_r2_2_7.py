@@ -63,6 +63,14 @@ def inno_compiler() -> Path:
 
 
 def configure_clean_runtime_environment() -> None:
+    configured_home = Path(os.environ.get("HOTSPOT_RUNTIME_SOURCE", ""))
+    configured_site_packages = Path(os.environ.get("HOTSPOT_RUNTIME_SITE_PACKAGES", ""))
+    if (
+        configured_home.is_dir()
+        and (configured_home / "python.exe").is_file()
+        and configured_site_packages.is_dir()
+    ):
+        return
     venv = ROOT / ".venv-r227-build"
     cfg = venv / "pyvenv.cfg"
     site_packages = venv / "Lib" / "site-packages"
@@ -613,4 +621,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
