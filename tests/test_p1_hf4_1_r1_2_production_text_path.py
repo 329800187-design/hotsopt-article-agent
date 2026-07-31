@@ -129,9 +129,11 @@ class TestDecodeProviderResponse:
         })
         resp = _mock_response(body)
         content, diag = _decode_provider_response(resp)
-        assert content == "MODEL_OUTPUT_EMPTY"
+        # R1.2.1: reasoning_content is now extracted as content
+        assert content == "Let me think about this..."
         assert diag.get("reasoning_content_present") is True
         assert diag.get("content_present") is False
+        assert diag.get("fallback_reasoning_content") is True
 
 
 # ── test 2: _request_text shared path ──
