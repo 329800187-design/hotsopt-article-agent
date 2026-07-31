@@ -84,10 +84,8 @@ def test_START_ERROR_CODES_DISTINCT_PASS():
 
 
 def test_R2_2_1_OUTPUT_NAMES_PASS():
-    from modules.app_version import APP_VERSION
-
     build = text("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert APP_VERSION in build
+    assert "RELEASE = APP_VERSION" in build
     assert "Source.zip" in build
     assert "_用户主流程GUI证据包.zip" in build
-    assert "等待用户" in build
+    assert "等待 Windows" in text("STATUS.md")

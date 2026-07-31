@@ -166,8 +166,9 @@ def test_failed_actions_simplified_and_default_zero_retry_pass():
 def test_r225_identity_and_final_status_pass():
     from modules.app_version import APP_VERSION
 
-    assert f'APP_VERSION = "{APP_VERSION}"' in read_text("modules/app_version.py")
+    assert APP_VERSION in read_text("modules/app_metadata.py")
+    assert "from modules.app_metadata import" in read_text("modules/app_version.py")
     assert f'Version = "{APP_VERSION}"' in read_text("packaging/setup_bootstrapper.cs")
     build = read_text("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert f'RELEASE = "{APP_VERSION}"' in build
-    assert "等待用户" in build
+    assert "RELEASE = APP_VERSION" in build
+    assert "等待 Windows" in read_text("STATUS.md")

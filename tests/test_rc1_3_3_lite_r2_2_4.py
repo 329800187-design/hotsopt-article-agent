@@ -132,10 +132,11 @@ def test_failed_progress_stops_and_reason_visible_pass():
 def test_r225_release_identity_and_status_pass():
     from modules.app_version import APP_VERSION
 
-    assert f'APP_VERSION = "{APP_VERSION}"' in read_text("modules/app_version.py")
+    assert APP_VERSION in read_text("modules/app_metadata.py")
+    assert "from modules.app_metadata import" in read_text("modules/app_version.py")
     assert f'Version = "{APP_VERSION}"' in read_text("packaging/setup_bootstrapper.cs")
     build = read_text("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert f'RELEASE = "{APP_VERSION}"' in build
+    assert "RELEASE = APP_VERSION" in build
     assert "output_setup" in build
     assert "Source.zip" in build
-    assert "等待用户" in build
+    assert "等待 Windows" in read_text("STATUS.md")

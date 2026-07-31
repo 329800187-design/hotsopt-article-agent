@@ -63,16 +63,16 @@ def isolated_config():
 
 
 # ---------------------------------------------------------------------------
-# 1. Dev mode uses PROJECT_ROOT/config
+# 1. Dev mode derives config from the single data root
 # ---------------------------------------------------------------------------
 
-def test_dev_mode_config_dir_is_project_root():
-    """In dev mode (not installed), config_dir should be under PROJECT_ROOT."""
+def test_dev_mode_config_dir_derives_from_data_root():
+    """Every launch mode derives config_dir from data_root."""
     old_install = os.environ.pop("HOTSPOT_INSTALL_MODE", None)
     try:
         assert not _ap.is_installed() or os.environ.get("LOCALAPPDATA", "").lower().find("programs") == -1
         cfg = _ap.config_dir()
-        assert cfg == _ap.PROJECT_ROOT / "config", f"Expected {_ap.PROJECT_ROOT / 'config'}, got {cfg}"
+        assert cfg == _ap.data_root() / "config", f"Expected {_ap.data_root() / 'config'}, got {cfg}"
     finally:
         if old_install:
             os.environ["HOTSPOT_INSTALL_MODE"] = old_install

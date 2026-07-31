@@ -171,8 +171,9 @@ def test_STANDARD_FIVE_ARTICLES_TEN_IMAGES_PASS():
 def test_R227_IDENTITY_AND_STATUS_PASS():
     from modules.app_version import APP_VERSION
 
-    assert f'APP_VERSION = "{APP_VERSION}"' in text("modules/app_version.py")
+    assert APP_VERSION in text("modules/app_metadata.py")
+    assert "from modules.app_metadata import" in text("modules/app_version.py")
     assert f'Version = "{APP_VERSION}"' in text("packaging/setup_bootstrapper.cs")
     build = text("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert f'RELEASE = "{APP_VERSION}"' in build
-    assert "等待用户" in build
+    assert "RELEASE = APP_VERSION" in build
+    assert "等待 Windows" in text("STATUS.md")

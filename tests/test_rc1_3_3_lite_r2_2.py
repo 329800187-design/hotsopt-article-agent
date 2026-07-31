@@ -83,11 +83,12 @@ def test_UNINSTALL_TEMP_CLEANER_PASS():
 
 
 def test_VISIBLE_APP_VERSION_PASS():
-    from modules.app_version import APP_VERSION
+    from modules.app_metadata import APP_VERSION
 
     at = _render_page("ⓘ 关于软件")
     rendered = str(at)
-    assert APP_VERSION in _source("modules/app_version.py")
+    assert "from modules.app_metadata import" in _source("modules/app_version.py")
+    assert APP_VERSION in _source("modules/app_metadata.py")
     assert "关于软件" in rendered
     assert "复制诊断信息" in rendered
 
@@ -128,10 +129,9 @@ def test_LEGACY_SINGLE_KEY_UI_REMOVED_PASS():
 
 
 def test_BUILD_OUTPUT_NAMES_R2_2_PASS():
-    from modules.app_version import APP_VERSION
-
     source = _source("scripts/build_rc1_3_3_lite_r2_2_7.py")
-    assert APP_VERSION in source
+    assert "from modules.app_metadata import" in source
+    assert "RELEASE = APP_VERSION" in source
     assert "Source.zip" in source
     assert "_用户主流程GUI证据包.zip" in source
-    assert "等待用户" in source
+    assert "等待 Windows" in _source("STATUS.md")

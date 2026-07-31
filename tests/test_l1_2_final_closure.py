@@ -191,16 +191,19 @@ def test_admin_readme_does_not_reference_missing_initializer():
 
 def test_admin_launcher_checks_dependency_and_uses_module_entrypoint():
     text = (ROOT / "start-license-generator.bat").read_text(encoding="utf-8")
-    assert "Hotspot License Admin.exe" in text
+    assert "热点图文工作台_本地许可证签发工具.exe" in text
+    assert text.index("热点图文工作台_本地许可证签发工具.exe") < text.index("Hotspot License Admin.exe")
     assert ".venv\\Scripts\\python.exe" in text
+    assert "py -3" in text
     assert "-m license_admin.license_generator_gui" in text
 
 
 def test_admin_gui_preflights_signing_identity():
     text = (ROOT / "license_admin/license_generator_gui.py").read_text(encoding="utf-8")
-    assert "load_signing_private_key()" in text
+    assert "signer_preflight()" in text
     assert "messagebox.showerror" in text
-    assert text.index("load_signing_private_key()") < text.index('root.title("离线许可证签发")')
+    assert text.index("signer_preflight()") < text.index('root.title("离线许可证签发")')
+    assert "state=tk.NORMAL if preflight[\"ready\"] else tk.DISABLED" in text
 
 
 def test_recovery_smoke_contains_required_pass_marker():
