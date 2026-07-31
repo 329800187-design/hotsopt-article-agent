@@ -1,1 +1,6 @@
-gh run download --repo 329800187-design/hotsopt-article-agent --name windows-delivery-evidence-8
+PENDING_WINDOWS_REAL_VALIDATION
+
+Pull the latest fix/r1.3-customer-delivery-final commit on Windows Hermes, then validate:
+source start -> installed start -> stable device code across restart -> production signer preflight -> real license signing -> client activation -> restricted-mode release -> real text and two-image acceptance.
+
+Do not close Issue #1 and do not set BUILD_ALLOWED or CUSTOMER_DELIVERY_ALLOWED true before all checks pass.
