@@ -32,9 +32,11 @@ def digest(path: Path) -> str:
 def build_native(output: Path) -> tuple[Path, Path]:
     output.mkdir(parents=True, exist_ok=True)
     projects = (ROOT / "packaging" / "launcher_shell.csproj", ROOT / "packaging" / "setup_bootstrapper.csproj")
+    built_with_dotnet = False
     try:
         for project in projects:
             subprocess.run(["dotnet", "build", str(project), "-c", "Release", "--nologo", "-o", str(output)], cwd=ROOT, check=True)
+        built_with_dotnet = True
     except (FileNotFoundError, subprocess.CalledProcessError):
         # Developer machines often have the .NET Framework compiler but not the
         # full SDK.  Keep the same Win32 GUI output available in that case.
@@ -57,6 +59,13 @@ def build_native(output: Path) -> tuple[Path, Path]:
         subprocess.run(setup_cmd, cwd=ROOT, check=True)
         launcher_tmp.replace(output / APP_EXE)
         setup_tmp.replace(output / (PRODUCT + "_Setup.exe"))
+    if built_with_dotnet:
+        fixed_launcher = output / "热点图文工作台.exe"
+        fixed_setup = output / "热点图文批量生产工作台_Setup.exe"
+        if fixed_launcher.is_file() and fixed_launcher != output / APP_EXE:
+            shutil.copy2(fixed_launcher, output / APP_EXE)
+        if fixed_setup.is_file() and fixed_setup != output / f"{PRODUCT}_Setup.exe":
+            shutil.copy2(fixed_setup, output / f"{PRODUCT}_Setup.exe")
     launcher = output / APP_EXE
     setup_stub = output / f"{PRODUCT}_Setup.exe"
     if not launcher.is_file() or not setup_stub.is_file():
