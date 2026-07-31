@@ -1,1 +1,1 @@
-gh run watch --repo 329800187-design/hotsopt-article-agent --exit-status
+gh run download --repo 329800187-design/hotsopt-article-agent --name windows-delivery-evidence-8

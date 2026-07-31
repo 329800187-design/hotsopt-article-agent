@@ -1,17 +1,17 @@
 # Windows 交付验证报告
 
 分支: `fix/r1.3-customer-delivery-final`
-构建时间: 2026-07-31 CST
-机器: i7-11800H / RTX 3060 / Windows 11
+最终自动构建时间: 2026-07-31 10:08 CST
+最终自动构建环境: GitHub Actions Windows 2025 x64
 
 ## 构建环境
 
 | 组件 | 状态 |
 |------|------|
-| Python | 3.11.15 ✅ |
-| Inno Setup | 6.7.3 (winget, %LOCALAPPDATA%\Programs\Inno Setup 6\) ✅ |
-| .NET SDK | 未安装，降级到 csc.exe (v4.0.30319) ✅ |
-| WebView2 Bootstrapper | 从原项目复制 ✅ |
+| Python | 3.11.9 ✅ |
+| Inno Setup | Chocolatey Inno Setup 6 ✅ |
+| .NET SDK | 8.0.x，两个 WinExe 项目均成功编译 ✅ |
+| WebView2 Bootstrapper | 微软 Evergreen 官方链接下载并校验 MZ/SHA256 ✅ |
 
 ## 修复
 
@@ -25,17 +25,18 @@
 | 步骤 | 结果 |
 |------|------|
 | compileall | PASS |
-| GitHub Actions pytest 全量 | 936 passed, 0 failed, 3 skipped |
+| GitHub Actions pytest 全量 | 941 passed, 0 failed, 3 skipped |
 | 历史本机记录 | 曾记录 2 个失败，但未附测试名或日志，不能作为最终证据 |
-| 安全扫描 | 待修复后的 Windows CI 复验 |
+| 安全扫描 | SECURITY_SCAN_PASS, forbidden_hits=[] |
+| 自动化构建门禁 | 9/9 PASS |
 
 ## 构建产物
 
 | 文件 | 大小 | SHA256 |
 |------|------|--------|
-| 热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Source.zip | 2.2 MB | 见 manifest |
-| 热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Windows运行包.zip | 91.9 MB | 见 manifest |
-| 热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Setup.exe | 59 MB | 见 manifest |
+| 热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Source.zip | CI 产物 | `3b0e50ab7e8cf7b8bdcd19c5d70779afb140b9dd6d0aa259c281b122db6b3eeb` |
+| hotspot-article-agent-windows-ci-windows.zip | CI 产物 | `31271c8ec69203049b36ccee32851d1ef197be26b7f27a716b760c33e8b6ced7` |
+| 热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Setup.exe | 87,446,666 bytes | `cff230bee302b529ca341b01e976d2b3a64b9e5fa6ef63f37a937e4ad6a19439` |
 
 ## 安装/卸载验证
 
@@ -64,4 +65,5 @@
 - `/VERYSILENT` 参数对此 Setup 不生效（Inno Setup 向导未编译为可静默模式），需手动点击安装
 - 缺少 .NET SDK 不影响构建，csc.exe 降级方案正常工作
 - 本报告不宣布客户交付通过。BUILD_ALLOWED=false, CUSTOMER_DELIVERY_ALLOWED=false
-- GitHub Actions 证据：run 30593120499 的测试为 936 passed、3 skipped；构建门禁仍失败，修复后须以新 run 为准。
+- GitHub Actions 最终绿色证据：run `30597712637`，提交 `876ac9e553e1e46273fe671732cd1bd54dea77de`。
+- 自动化测试、构建、安装和卸载已通过；真实文本 API、真实两图、DPAPI 进程重启、许可证真实激活及人工 Word/ZIP 检查尚未执行。

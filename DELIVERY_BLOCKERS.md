@@ -2,22 +2,18 @@
 
 ## Active Blockers
 
-1. The repaired Windows CI build gates need a green rerun.
-   - Run `30593120499` proved `936 passed, 0 failed, 3 skipped`.
-   - It failed launcher, portable-package and Inno gates; fixes now require Windows-runner verification.
-
-2. Installed-build credential and license persistence remain unverified.
+1. Installed-build credential and license persistence remain unverified.
    - Required: DPAPI text/image credential restart recovery and the real license activation matrix.
 
-3. Real image provider smoke is externally blocked.
+2. Real image provider smoke is externally blocked.
    - No verified funded image-provider credential is available in the Mac handoff environment.
    - Minimum remaining paid validation: 2 calls for one cover image and one inline image.
    - Required closure: validate both files, export Word, export ZIP, and retain provider evidence without recording the API key.
 
-4. Final installed customer flow remains outstanding.
+3. Final installed customer flow remains outstanding.
    - Required: latest-Setup real article/two-image smoke, manual Word/ZIP inspection, single instance and restart recovery.
 
-5. The final Setup must be rebuilt after all preceding gates pass.
+4. A customer-release Setup must be rebuilt after all real-business gates pass.
 
 ## Not Blockers
 
@@ -32,6 +28,7 @@
 - A prior Windows machine report records Setup build, install, uninstall and API health 200.
 - Windows Actions full suite has zero failures; the unsupported historical “2 failures” claim is not an active blocker.
 - The exact package security allow rule is implemented locally with no whole-file exemption and currently reports `SECURITY_SCAN_PASS`.
+- Windows CI run `30597712637` passed `941` tests, security, launcher, portable package, Inno Setup and all five install/uninstall checks.
 
 ## External Blockers
 

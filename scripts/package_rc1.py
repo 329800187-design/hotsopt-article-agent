@@ -7,6 +7,7 @@ import io
 import importlib.metadata as metadata
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -427,7 +428,7 @@ def _write_release_audit(prefix: str, source_result: dict[str, object], windows_
     audit = {
         "stage": "RC1.3.2",
         "source": {"zip": f"{prefix}-source.zip", "file_count": source_result.get("file_count"), "sha256": source_result.get("sha256")},
-        "windows": {"zip": f"{prefix}-windows.zip", "file_count": windows_result.get("file_count"), "sha256": windows_result.get("sha256"), "python_runtime": "3.12.10", "dependency_versions": windows_result.get("dependency_versions", {})},
+        "windows": {"zip": f"{prefix}-windows.zip", "file_count": windows_result.get("file_count"), "sha256": windows_result.get("sha256"), "python_runtime": platform.python_version(), "dependency_versions": windows_result.get("dependency_versions", {})},
         "upload": (
             {"zip": f"{prefix}-upload.zip", "file_count": upload_result.get("file_count"), "sha256": upload_result.get("sha256")}
             if upload_result

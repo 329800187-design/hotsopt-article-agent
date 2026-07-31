@@ -8,7 +8,7 @@ Windows CI workflow introduced at: `c969109a5968a232fda49892e5935ebe438db0af`
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
-Current phase: Windows CI build-gate repair, installed-app closure and real-image handoff
+Current phase: Windows automated gates passed; installed real-business closure remains
 
 ## Completed
 
@@ -38,10 +38,11 @@ Current phase: Windows CI build-gate repair, installed-app closure and real-imag
 - The earlier local claim of two Windows failures has no attached test names or stack traces and is superseded by the reproducible GitHub Actions result.
 - The Windows machine report records a successful Setup build, install, uninstall and `/api/health` 200.
 - The package scanner now uses exact runtime-token assignment rules; the whole-file `desktop_host.py` exemption has been removed and hardcoded-key regressions were added.
+- Windows Delivery CI run `30597712637` passed all automated gates: full pytest, security, launcher, portable package, Inno Setup and install/uninstall.
+- Final automated test count is `941 passed, 3 skipped`; security is `SECURITY_SCAN_PASS` with no forbidden hits.
 
 ## Not Completed
 
-- Green rerun of all Windows CI build gates after the package/runtime, launcher and Inno workflow fixes.
 - Installed-build DPAPI restart persistence and real license activation matrix.
 - Real image provider smoke with two validated generated images.
 - Final installed Windows customer flow: real article+image generation, Word/ZIP inspection, restart/single-instance recovery.
@@ -65,7 +66,7 @@ Current phase: Windows CI build-gate repair, installed-app closure and real-imag
 - other: final log shows `135 passed`.
 - phase: last known `208 passed`.
 - Final Mac security scan: `SECURITY_SCAN_PASS`, `forbidden_hits=[]`, 353 files scanned.
-- Windows CI run `30593120499`: `936 passed, 3 skipped`; compileall and freeze verification passed. Launcher, portable package and Inno gates failed and are being repaired.
+- Windows CI run `30597712637`: all 9 evaluated gates passed; `941 passed, 3 skipped`.
 
 ## Recent Real Smoke
 
@@ -75,16 +76,15 @@ Current phase: Windows CI build-gate repair, installed-app closure and real-imag
 
 ## Windows Handoff Checklist
 
-1. Rerun Windows Delivery CI and require every automated gate to pass.
+1. Download the latest green Windows evidence and Setup.
 2. On the newly built Setup, verify DPAPI text/image credentials across a full process restart.
 3. Verify unactivated, valid, invalid, device-bound and restart-persistent license states.
 4. Generate one real article with one cover and one inline image; validate both images.
 5. Open and inspect Word and ZIP, then verify restart recovery and single-instance behavior.
-6. Re-run uninstall and retained-user-data checks against the final Setup.
 
 ## Next Command
 
-`gh run watch --repo 329800187-design/hotsopt-article-agent --exit-status`
+`gh run download --repo 329800187-design/hotsopt-article-agent --name windows-delivery-evidence-8`
 
 ## Gates
 
