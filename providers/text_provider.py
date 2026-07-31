@@ -339,7 +339,12 @@ def _decode_provider_response(response: httpx.Response) -> tuple[str, dict[str, 
                     diagnostic["parser_mode"] = "json"
                     diagnostic["content_present"] = False
                     diagnostic["reasoning_content_present"] = True
-                    return ("MODEL_OUTPUT_EMPTY", diagnostic)
+                    # R1.2.1: Use reasoning_content as content for reasoning models (DeepSeek v4)
+                    rc = str(msg.get("reasoning_content") or "").strip()
+                    if rc:
+                        diagnostic["fallback_reasoning_content"] = True
+                        return (rc, diagnostic)
+                    return ("", diagnostic)
         # Empty JSON but valid
         diagnostic["parser_mode"] = "json"
         return ("", diagnostic)
