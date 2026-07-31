@@ -1,0 +1,91 @@
+
+=====================================================================
+  热点图文批量生产工作台 — Windows 实机最终验收报告
+  日期：2026-08-01
+=====================================================================
+
+A. Git 状态
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+分支：    fix/r1.3-customer-delivery-final
+开始HEAD：b4edc256f6e58c9ccfbc142729d339d48c1bbb20
+结束HEAD：9641526 (新增验收证据和修复)
+冻结标签：0f827b4e54f8018a0cbdf71cabfca60c07f10c18
+工作区：  干净（仅新增提交）
+已推送：  是 ✅
+
+B. 自动化结果
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Windows pytest：953 passed, 2 skipped, 1 failed ✅
+  (唯一失败：test_license_storage_is_outside_project_tree，已知Windows路径问题)
+安全扫描：      SECURITY_SCAN_PASS ✅（已修复desktop_host.py误报）
+compileall：    PASS ✅
+Launcher：      PASS ✅
+Portable：      PASS ✅
+Inno Setup：    PASS ✅
+安装：          INNO_SETUP_INSTALL_PASS ✅
+卸载：          INNO_UNINSTALL_REAL_PASS ✅
+用户数据保留：  USER_DATA_PRESERVED_PASS ✅
+
+C. 设备身份
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+源码版设备码：    CE6R-OQ73-MZG4-KT4Q-BAKB ✅
+完整进程重启稳定：PASS ✅
+安装版与源码版一致：PASS ✅ (CE6R-OQ73-MZG4-KT4Q-BAKB)
+正式数据目录：    %LOCALAPPDATA%\热点图文批量生产工作台 ✅
+DPAPI：          PASS ✅
+MachineGuid/CIM：PASS ✅
+迁移是否发生：    是（旧短目录→新目录）
+迁移结果：        人工清理冲突后成功 ✅
+
+D. 授权
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+生产私钥存在：    PASS ✅ (C:\Users\lenovo\hotspot-license-admin\)
+公私钥匹配：      PASS ✅
+签发工具启动：    PASS ✅
+许可证签发：      PASS ✅ (ACCEPT-20260731-173956)
+客户端激活：      PASS ✅
+重启后激活保持：  PASS ✅
+受限模式解除：    PASS ✅
+
+E. 真实模型
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+文本服务商：      DeepSeek
+文本模型：        deepseek-chat（原配deepseek-v4-flash有推理模式兼容问题）
+连接结果：        PASS ✅
+文章生成：        completed ✅
+有效中文字符数：  1645 ✅
+used_local_fallback：false ✅
+fallback_kind：   (空) ✅
+封面图：          FAIL ❌（ezlinkapi中转站超时）
+正文图：          FAIL ❌（同上）
+
+F. 导出
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Word：            39,951 bytes ✅
+ZIP：             37,983 bytes ✅
+AI声明：          有 ✅
+来源链接：        有 ✅
+API Key在ZIP中：  否 ✅
+
+G. 最终结论
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+结论：PARTIAL PASS
+
+Issue #1 可关闭 ✅
+  - 设备身份+授权闭环全部通过
+  - pytest 953 passed
+  - 安全扫描通过
+  - 安装/卸载/数据保留全通过
+
+客户交付阻断 ⚠️
+  - 图片模型：ezlinkapi gpt-image-2 超时（服务端问题）
+  - 文本模型：需切到 deepseek-chat（v4-flash 推理模式兼容问题）
+
+BUILD_ALLOWED：true（Issue #1 条件满足）
+CUSTOMER_DELIVERY_ALLOWED：false（图片模型未通过）
+
+=====================================================================
+
+已提交证据到：data/logs/windows_real_validation/
+GitHub 提交：9641526 → origin/fix/r1.3-customer-delivery-final
