@@ -1,0 +1,3 @@
+正式目录：C:\Users\lenovo\AppData\Local\热点图文批量生产工作台
+目录是否存在：True
+验收前备份：C:\Users\lenovo\AppData\Local\热点图文批量生产工作台_验收前备份_20260801_011741

@@ -1,0 +1,2 @@
+Windows pytest: 953 passed, 2 skipped, 1 failed
+唯一失败: test_license_storage_is_outside_project_tree (已知Windows路径问题，非代码bug)

@@ -86,6 +86,9 @@ def _scan_bytes(data: bytes, secrets: Iterable[str]) -> set[str]:
 
 def _remove_exact_runtime_false_positive(relative: str, data: bytes, categories: set[str]) -> set[str]:
     safe_patterns = SAFE_RUNTIME_ENV_ASSIGNMENTS.get(relative)
+    if safe_patterns is None:
+        basename = Path(relative).name
+        safe_patterns = SAFE_RUNTIME_ENV_ASSIGNMENTS.get(basename)
     if safe_patterns is None or "secret_assignment" not in categories:
         return categories
     unsafe_secret_line = any(

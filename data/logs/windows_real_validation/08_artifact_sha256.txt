@@ -1,0 +1,16 @@
+构建产物：
+- Setup: 热点图文批量生产工作台_RC1.3.3-Lite-R2.2.8_Setup.exe
+  SHA256: 23e9b5e1b56e09699df25ca72b9e49c27ff303ebf28457cd917b8cb9fe8c0d10
+  
+构建状态: PASS
+Launcher: PASS
+Portable: PASS
+Inno Setup: PASS
+安装: INNO_SETUP_INSTALL_PASS
+卸载: INNO_UNINSTALL_REAL_PASS
+用户数据保留: USER_DATA_PRESERVED_PASS
+
+-rwxr-xr-x 1 lenovo 197609  59M Aug  1 01:46 热点图文批量生产工作台_RC1.3.3-Lite-R2.2.8_Setup.exe
+-rw-r--r-- 1 lenovo 197609 2.2M Aug  1 01:42 热点图文批量生产工作台_RC1.3.3-Lite-R2.2.8_Source.zip
+-rw-r--r-- 1 lenovo 197609  58M Aug  1 01:47 热点图文批量生产工作台_RC1.3.3-Lite-R2.2.8_客户交付包.zip
+

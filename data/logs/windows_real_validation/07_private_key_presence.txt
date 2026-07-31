@@ -1,0 +1,11 @@
+默认私钥是否存在：True
+默认私钥路径：C:\Users\lenovo\hotspot-license-admin\license_private_key.pem
+环境变量是否设置：False
+环境变量目标是否存在：False
+客户端公钥是否存在：True
+
+预检结果：
+
+STDERR: Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+ImportError: cannot import name 'load_signing_identity' from 'license_admin.signing_identity' (E:\hotspot-article-agent\license_admin\signing_identity.py)

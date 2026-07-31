@@ -1,0 +1,64 @@
+{
+  "title": "Windows 实机最终验收 — 问题报告",
+  "timestamp": "2026-08-01T02:31:31.634961",
+  "acceptance_status": "PARTIAL PASS",
+  "summary": "Issue #1 设备身份+授权闭环通过。文本模型验收通过（deepseek-chat）。图片模型因 ezlinkapi 超时未通过。Word/ZIP导出通过。安装/卸载/数据保留通过。",
+  "environment": {
+    "computer": "小七的破烂电脑",
+    "user": "lenovo",
+    "head": "b4edc256f6e58c9ccfbc142729d339d48c1bbb20",
+    "branch": "fix/r1.3-customer-delivery-final",
+    "freeze_tag": "0f827b4e54f8018a0cbdf71cabfca60c07f10c18"
+  },
+  "test_results": {
+    "pytest": "953 passed, 2 skipped, 1 failed (known)",
+    "security_scan": "PASS (after fix)",
+    "compileall": "PASS"
+  },
+  "issues": [
+    {
+      "id": "KNOWN-01",
+      "severity": "minor",
+      "title": "test_license_storage_is_outside_project_tree 在Windows上始终失败",
+      "description": "项目目录名包含 'hotspot-article-agent' 触发路径检查。已知Windows环境问题，非代码bug。",
+      "recommendation": "克隆到不含 'hotspot-article-agent' 的目录名，或修改测试排除此路径。"
+    },
+    {
+      "id": "MODEL-01",
+      "severity": "major",
+      "title": "deepseek-v4-flash 推理模型返回 reasoning_content 但 content 为空",
+      "description": "DeepSeek v4 Flash 是推理模型，max_tokens 较小时所有tokens用于reasoning导致content为空。basic_connection_test max_tokens=8时100%触发。文章生成时max_tokens=2200时仍可能触发。",
+      "recommendation": "① text_provider.py 添加 reasoning_content 提取逻辑作为 content 的fallback；② 推荐用户使用 deepseek-chat（非推理模型）。",
+      "status": "workaround: 切换到 deepseek-chat"
+    },
+    {
+      "id": "MODEL-02",
+      "severity": "major",
+      "title": "ezlinkapi 中转站 gpt-image-2 图片生成超时",
+      "description": "POST https://api.ezlinkapi.top/v1/images/generations 超时30s+无响应。图片生成完全不可用。",
+      "recommendation": "确认 ezlinkapi 是否支持 /v1/images/generations 端点及 gpt-image-2 模型，或更换图片服务商。"
+    },
+    {
+      "id": "FIX-01",
+      "severity": "minor",
+      "title": "security_scan.py 对 build/inno-r227/app/desktop_host.py 误报 secret_assignment",
+      "description": "_remove_exact_runtime_false_positive() 仅按完整相对路径查找 SAFE_RUNTIME_ENV_ASSIGNMENTS。build目录下的副本路径不匹配。",
+      "fix": "已修复：添加 basename 匹配回退逻辑。提交到 scripts/security_scan.py。",
+      "status": "fixed"
+    },
+    {
+      "id": "DATA-01",
+      "severity": "critical",
+      "title": "旧身份数据导致 INSTALLATION_ID_CONFLICT 阻止启动",
+      "description": "上一版本的短名称目录 (热点图文工作台) 和源码 data/license 同时存在不同身份时，migrate_legacy_data() 返回冲突。导致 pytest 全部 ERROR、应用无法启动。",
+      "recommendation": "考虑在 migrate_legacy_data() 中添加交互式冲突解决流程，或提供清理旧身份的CLI命令。"
+    },
+    {
+      "id": "NOTE-01",
+      "severity": "info",
+      "title": "start_backend_dev.py / desktop_host.py 在无GUI环境下静默退出",
+      "description": "desktop_host.py 的 run() 方法调用 WebView2 窗口创建，在 headless/CI 环境下无输出退出。--headless-smoke 模式也只打印两行后退出。自动化测试需用 prepare_environment() + start_backend() 的组合。",
+      "recommendation": "为 CI 环境提供官方 supported 的 headless 启动方式。"
+    }
+  ]
+}

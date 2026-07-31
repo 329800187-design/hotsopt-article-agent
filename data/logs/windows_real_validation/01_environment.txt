@@ -1,0 +1,10 @@
+验收时间：2026-08-01 01:17:41 
+计算机：小七的破烂电脑
+用户：lenovo
+仓库：E:\hotspot-article-agent
+HEAD：b4edc256f6e58c9ccfbc142729d339d48c1bbb20
+分支：fix/r1.3-customer-delivery-final
+冻结标签：0f827b4e54f8018a0cbdf71cabfca60c07f10c18
+Python：Python 3.11.15
+Git：git version 2.55.0.windows.3
+PowerShell：5.1.22621.6133
