@@ -4,7 +4,7 @@
 
 版本：`RC1.3.3-Lite-R2.2.8`
 
-状态：Issue #1 Mac 自动化修复完成，最新提交的 Windows CI 与 Windows Hermes 真实许可证闭环待执行。
+状态：Issue #1 Mac 自动化修复与 Windows CI 完成；Windows Hermes 真实许可证闭环待执行。
 
 ## Issue #1 修复
 
@@ -32,7 +32,15 @@
 
 ## Windows CI
 
-Issue #1 最新提交推送后填写真实运行链接和结果。在此之前不得沿用旧提交的绿色 CI 作为本次修复证明。
+[Windows Delivery CI run 30622596471（attempt 2）](https://github.com/329800187-design/hotsopt-article-agent/actions/runs/30622596471) 已通过：
+
+- pytest：`953 passed, 0 failed, 3 skipped`
+- `SECURITY_SCAN_PASS`
+- 原生 Launcher：PASS
+- Portable package：PASS
+- Inno Setup build/install/uninstall：PASS
+- Windows 已安装应用入口：PASS
+- 卸载保留用户数据：PASS
 
 ## PENDING_WINDOWS_REAL_VALIDATION
 

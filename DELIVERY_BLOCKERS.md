@@ -17,7 +17,7 @@
 - Mac security scan: `SECURITY_SCAN_PASS`, no forbidden hits.
 - Migration tests: `4 passed`.
 - Signer tests: `4 passed`.
-- Latest Windows CI for this Issue #1 commit: pending.
+- Windows CI run `30622596471` attempt 2: `953 passed, 3 skipped`; security, launcher, portable, Inno Setup, install, uninstall, and preserved-user-data gates passed.
 
 Issue #1 must remain open until the real Windows activation closure is complete.
 

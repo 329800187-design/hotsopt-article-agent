@@ -6,7 +6,7 @@ Version: `RC1.3.3-Lite-R2.2.8`
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
-Current phase: Issue #1 automated repair complete on Mac; Windows CI and real Windows activation validation pending.
+Current phase: Issue #1 automated repair and Windows CI complete; real Windows activation validation pending.
 
 ## Issue #1 completed locally
 
@@ -17,6 +17,7 @@ Current phase: Issue #1 automated repair complete on Mac; Windows CI and real Wi
 - Added signer private/public key preflight and strict mismatch rejection.
 - Centralized release metadata in `modules/app_metadata.py`.
 - Mac full suite: `938 passed, 18 skipped`; security: `SECURITY_SCAN_PASS`.
+- Windows CI run `30622596471` attempt 2: `953 passed, 3 skipped`; all automated delivery gates passed.
 
 ## Pending Windows real validation
 
