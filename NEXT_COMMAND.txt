@@ -1,1 +1,1 @@
-git fetch --all --tags --prune
+gh run watch --repo 329800187-design/hotsopt-article-agent --exit-status

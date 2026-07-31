@@ -37,6 +37,17 @@ ARCHIVE_TEXT_EXTENSIONS = {
     ".yml",
 }
 MAX_ARCHIVE_ENTRY_BYTES = 2_000_000
+SAFE_RUNTIME_ENV_ASSIGNMENTS = {
+    "desktop_host.py": (
+        re.compile(
+            rb"""^\s*token\s*=\s*os\.environ\.get\(\s*["']HOTSPOT_LOCAL_API_TOKEN["']\s*,\s*["']{2}\s*\)\s*$"""
+        ),
+        re.compile(rb"^\s*token\s*=\s*self\._token\(\s*\)\s*$"),
+    ),
+    "start_backend_dev.py": (
+        re.compile(rb"^\s*token\s*=\s*get_or_create_token\(\s*\)\s*$"),
+    ),
+}
 
 
 def _relative(root: Path, path: Path) -> str:
@@ -70,6 +81,21 @@ def _scan_bytes(data: bytes, secrets: Iterable[str]) -> set[str]:
     for name, pattern in PATTERNS.items():
         if pattern.search(data):
             categories.add(name)
+    return categories
+
+
+def _remove_exact_runtime_false_positive(relative: str, data: bytes, categories: set[str]) -> set[str]:
+    safe_patterns = SAFE_RUNTIME_ENV_ASSIGNMENTS.get(relative)
+    if safe_patterns is None or "secret_assignment" not in categories:
+        return categories
+    unsafe_secret_line = any(
+        PATTERNS["secret_assignment"].search(line)
+        and not any(pattern.fullmatch(line) for pattern in safe_patterns)
+        for line in data.splitlines()
+    )
+    if not unsafe_secret_line:
+        categories = set(categories)
+        categories.discard("secret_assignment")
     return categories
 
 
@@ -123,7 +149,9 @@ def scan_tree(root: Path, secrets: Iterable[str] = ()) -> dict:
         is_binary = b"\x00" in data
         if is_binary:
             binary_files_scanned += 1
-        categories = _scan_bytes(data, secret_values)
+        categories = _remove_exact_runtime_false_positive(
+            relative, data, _scan_bytes(data, secret_values)
+        )
         if path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
             categories.update(_scan_sqlite(path, secret_values))
         archive_has_test_fixture = False
@@ -145,10 +173,6 @@ def scan_tree(root: Path, secrets: Iterable[str] = ()) -> dict:
             continue
         hit = {"path": relative, "categories": sorted(categories)}
         if relative in EXCLUDED_RELATIVE:
-            allowed_hits.append(hit)
-        elif relative in {"desktop_host.py", "start_backend_dev.py"} and not (
-            categories & {"configured_secret", "private_key_material", "openai_key", "proxy_credentials"}
-        ):
             allowed_hits.append(hit)
         elif archive_runtime_categories and categories <= archive_runtime_categories and relative.lower().endswith(".zip"):
             runtime_artifact_hits.append(hit)

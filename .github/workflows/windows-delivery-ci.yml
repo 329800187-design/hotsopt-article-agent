@@ -51,10 +51,10 @@ jobs:
             throw "FREEZE_TAG_MISMATCH: $freeze"
           }
 
-      - name: Set up Python 3.12.10
+      - name: Set up Python 3.11.15
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12.10"
+          python-version: "3.11.15"
           cache: pip
           cache-dependency-path: |
             requirements.txt
@@ -180,7 +180,7 @@ jobs:
           New-Item -ItemType Directory -Force data/logs | Out-Null
           "Windows GitHub Actions delivery validation" | Set-Content -Encoding UTF8 data/logs/windows_ci_report.txt
           $env:HOTSPOT_RUNTIME_SOURCE = python -c "import sys; print(sys.base_prefix)"
-          $env:HOTSPOT_RUNTIME_SITE_PACKAGES = python -c "import site; print(site.getsitepackages()[0])"
+          $env:HOTSPOT_RUNTIME_SITE_PACKAGES = python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"
           $env:RC1_PACKAGE_PREFIX = "hotspot-article-agent-windows-ci"
           @(
             "HOTSPOT_RUNTIME_SOURCE=$env:HOTSPOT_RUNTIME_SOURCE"
@@ -196,22 +196,14 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Stop"
-          $isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-          $iscc = if ($isccCommand) { $isccCommand.Source } else { "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
-          if (-not (Test-Path $iscc)) {
-            throw "INNO_SETUP_COMPILER_NOT_FOUND: $iscc"
-          }
-          $ignored = "\\.venv\\|\\runtime\\|\\site-packages\\|\\release\\|\\dist\\|\\build\\"
-          $scripts = @(Get-ChildItem -Path . -Recurse -File -Filter *.iss | Where-Object { $_.FullName -notmatch $ignored })
-          $scripts.FullName | Set-Content -Encoding UTF8 artifacts/windows-ci/inno-scripts.txt
-          if ($scripts.Count -eq 0) {
-            throw "INNO_SETUP_SCRIPT_NOT_FOUND"
-          }
-          foreach ($script in $scripts) {
-            & $iscc $script.FullName 2>&1 | Tee-Object -FilePath artifacts/windows-ci/inno-build.txt -Append
-            if ($LASTEXITCODE -ne 0) {
-              throw "INNO_SETUP_BUILD_FAILED: $($script.FullName)"
-            }
+          $env:HOTSPOT_RUNTIME_SOURCE = python -c "import sys; print(sys.base_prefix)"
+          $env:HOTSPOT_RUNTIME_SITE_PACKAGES = python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+          python scripts/build_rc1_3_3_lite_r2_2_7.py 2>&1 | Tee-Object -FilePath artifacts/windows-ci/inno-build.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setups = @(Get-ChildItem -Path . -File -Filter *_Setup.exe)
+          $setups.FullName | Set-Content -Encoding UTF8 artifacts/windows-ci/inno-products.txt
+          if ($setups.Count -eq 0) {
+            throw "INNO_SETUP_OUTPUT_NOT_FOUND"
           }
 
       - name: Inventory generated artifacts

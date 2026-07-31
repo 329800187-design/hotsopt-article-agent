@@ -8,6 +8,7 @@
     <RootNamespace>HotspotArticleAgentSetup</RootNamespace>
     <ApplicationIcon>..\ui\assets\brand.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="setup_bootstrapper.cs" />

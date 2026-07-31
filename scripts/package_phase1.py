@@ -24,6 +24,12 @@ SENSITIVE_PATTERNS = {
 }
 TEST_FIXTURE_MARKER = re.compile(r"def\s+test_|pytest|test_fixture|example\.invalid|\b(:SECRET|TOKEN|COOKIE|PWD|TOP_SECRET|EMBEDDED_SECRET)\b|fake[-_ ]image", re.I)
 RUNTIME_PARTS = {".venv", "__pycache__", ".pytest_cache", ".pytest-tmp", ".tmp", "logs", "outputs", "data", "build"}
+SAFE_RUNTIME_TOKEN_ASSIGNMENTS = (
+    re.compile(
+        r"""^\s*token\s*=\s*os\.environ\.get\(\s*["']HOTSPOT_LOCAL_API_TOKEN["']\s*,\s*["']{2}\s*\)\s*$"""
+    ),
+    re.compile(r"^\s*token\s*=\s*self\._token\(\s*\)\s*$"),
+)
 
 
 def should_copy(path: Path) -> bool:
@@ -37,13 +43,32 @@ def should_copy(path: Path) -> bool:
     return not any(part in RUNTIME_PARTS for part in path.parts) and path.suffix not in {".pyc", ".pyo"} and path.name not in {"settings.json", "credentials.dat"} and path.name != "Windows商业交付候选版_RC1.3_最终验收报告.md"
 
 
-def scan_text(path: Path, text: str) -> list[str]:
-    return [name for name, pattern in SENSITIVE_PATTERNS.items() if pattern.search(text)]
+def scan_text(path: Path | str, text: str) -> list[str]:
+    relative = Path(path).as_posix()
+    categories: list[str] = []
+    for name, pattern in SENSITIVE_PATTERNS.items():
+        if name != "key_assignment":
+            if pattern.search(text):
+                categories.append(name)
+            continue
+        unsafe_match = False
+        for line in text.splitlines():
+            if not pattern.search(line):
+                continue
+            if relative == "desktop_host.py" and any(
+                safe.fullmatch(line) for safe in SAFE_RUNTIME_TOKEN_ASSIGNMENTS
+            ):
+                continue
+            unsafe_match = True
+            break
+        if unsafe_match:
+            categories.append(name)
+    return categories
 
 
-def scan_bytes(data: bytes) -> list[str]:
+def scan_bytes(data: bytes, path: Path | str = "") -> list[str]:
     text = data.decode("utf-8", errors="replace")
-    return [name for name, pattern in SENSITIVE_PATTERNS.items() if pattern.search(text)]
+    return scan_text(path, text)
 
 
 def main() -> None:
@@ -75,7 +100,7 @@ def main() -> None:
             raw = path.read_bytes()
             if b"\x00" in raw:
                 binary_files_scanned += 1
-            categories = scan_bytes(raw)
+            categories = scan_bytes(raw, relative)
             if not categories:
                 continue
             text = raw.decode("utf-8", errors="replace")
@@ -95,7 +120,7 @@ def main() -> None:
             slash_violations = [entry for entry in entries if "\\" in entry]
             zip_dirty = [entry for entry in entries if entry.endswith(".pyc") or "__pycache__/" in entry or entry.endswith("settings.json") or entry.endswith(".lnk")]
             for entry in archive.infolist():
-                categories = scan_bytes(archive.read(entry))
+                categories = scan_bytes(archive.read(entry), entry.filename)
                 if not categories:
                     continue
                 hit = {"path": entry.filename, "categories": categories}
@@ -113,14 +138,14 @@ def main() -> None:
             "files": entries,
             "sha256": digest,
             "dirty_entries": sorted(set(dirty_entries + zip_dirty + slash_violations)),
-            "sensitive_hits": [h for h in sensitive_hits if h["path"] not in {"desktop_host.py"}],
+            "sensitive_hits": sensitive_hits,
             "test_fixture_hits": test_fixture_hits,
             "runtime_artifact_hits": runtime_artifact_hits,
             "files_scanned": len(files),
             "binary_files_scanned": binary_files_scanned,
             "allowed_hits": [],
-            "forbidden_hits": [h for h in sensitive_hits if h["path"] not in {"desktop_host.py"}],
-            "status": "PACKAGE_SCAN_PASS" if not [h for h in sensitive_hits if h["path"] not in {"desktop_host.py"}] and not runtime_artifact_hits and not dirty_entries and not zip_dirty and not slash_violations else "PACKAGE_SCAN_FAILED",
+            "forbidden_hits": sensitive_hits,
+            "status": "PACKAGE_SCAN_PASS" if not sensitive_hits and not runtime_artifact_hits and not dirty_entries and not zip_dirty and not slash_violations else "PACKAGE_SCAN_FAILED",
         }
         MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         if manifest["dirty_entries"] or manifest["sensitive_hits"] or manifest["runtime_artifact_hits"]:

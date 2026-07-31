@@ -213,7 +213,7 @@ def scan_zip(path: Path) -> list[dict[str, object]]:
     hits: list[dict[str, object]] = []
     with zipfile.ZipFile(path) as archive:
         for info in archive.infolist():
-            categories = package_phase1.scan_bytes(archive.read(info))
+            categories = package_phase1.scan_bytes(archive.read(info), info.filename)
             if categories:
                 hits.append({"path": info.filename, "categories": categories})
     return hits

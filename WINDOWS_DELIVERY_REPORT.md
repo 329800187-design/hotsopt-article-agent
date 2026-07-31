@@ -18,16 +18,16 @@
 | 文件 | 问题 | 处理 |
 |------|------|------|
 | `hot_sources/base.py` | Mac 提交 61c1f7d 将其整个文件替换为一个 commit hash | 从 da8f214 恢复 |
-| `scripts/package_phase1.py` | 安全扫描将 desktop_host.py 的 `token = os.environ.get(...)` 误报为密钥泄露 | 在 sensitive_hits/forbidden_hits/status 三处过滤 desktop_host.py |
+| `scripts/package_phase1.py` | 运行时令牌读取被误报，同时存在整文件豁免 | 改为仅允许两种精确的运行时令牌赋值表达式；其他硬编码密钥继续阻断 |
 
 ## 测试结果
 
 | 步骤 | 结果 |
 |------|------|
 | compileall | PASS |
-| pytest 全量 | 935 passed, 2 failed, 2 skipped (99.8%) |
-| 2 个失败原因 | CRLF行尾 + 目录名含关键词（均为环境差异） |
-| 安全扫描 | PACKAGE_SCAN_PASS, forbidden_hits=[] |
+| GitHub Actions pytest 全量 | 936 passed, 0 failed, 3 skipped |
+| 历史本机记录 | 曾记录 2 个失败，但未附测试名或日志，不能作为最终证据 |
+| 安全扫描 | 待修复后的 Windows CI 复验 |
 
 ## 构建产物
 
@@ -64,3 +64,4 @@
 - `/VERYSILENT` 参数对此 Setup 不生效（Inno Setup 向导未编译为可静默模式），需手动点击安装
 - 缺少 .NET SDK 不影响构建，csc.exe 降级方案正常工作
 - 本报告不宣布客户交付通过。BUILD_ALLOWED=false, CUSTOMER_DELIVERY_ALLOWED=false
+- GitHub Actions 证据：run 30593120499 的测试为 936 passed、3 skipped；构建门禁仍失败，修复后须以新 run 为准。

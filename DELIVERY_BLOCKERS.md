@@ -2,21 +2,22 @@
 
 ## Active Blockers
 
-1. Final Windows Setup build is not passing.
-   - Last build attempt log: `data/logs/final_p1_api_setup_build.txt`.
-   - Observed blocker: missing `.NET SDK` for native launcher build.
-   - Observed blocker: source package audit flags `desktop_host.py` token variable as a sensitive assignment.
+1. The repaired Windows CI build gates need a green rerun.
+   - Run `30593120499` proved `936 passed, 0 failed, 3 skipped`.
+   - It failed launcher, portable-package and Inno gates; fixes now require Windows-runner verification.
 
-2. Full customer delivery closure has not been executed from an installed Windows build.
-   - Required: install, desktop launch, activation, text model test, image model test, hotspot refresh, article+two-image generation, Word export, ZIP export, restart recovery, uninstall.
+2. Installed-build credential and license persistence remain unverified.
+   - Required: DPAPI text/image credential restart recovery and the real license activation matrix.
 
 3. Real image provider smoke is externally blocked.
    - No verified funded image-provider credential is available in the Mac handoff environment.
    - Minimum remaining paid validation: 2 calls for one cover image and one inline image.
    - Required closure: validate both files, export Word, export ZIP, and retain provider evidence without recording the API key.
 
-4. Windows-only validation remains outstanding.
-   - Required: DPAPI, license, native launcher, Setup, install/uninstall, single instance, restart recovery and user-data policy.
+4. Final installed customer flow remains outstanding.
+   - Required: latest-Setup real article/two-image smoke, manual Word/ZIP inspection, single instance and restart recovery.
+
+5. The final Setup must be rebuilt after all preceding gates pass.
 
 ## Not Blockers
 
@@ -28,10 +29,13 @@
 - Annotated freeze tag is restored and peels to `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`.
 - Mac full suite passed: `921 passed, 18 skipped`.
 - Mac security scan passed with no forbidden hits.
+- A prior Windows machine report records Setup build, install, uninstall and API health 200.
+- Windows Actions full suite has zero failures; the unsupported historical “2 failures” claim is not an active blocker.
+- The exact package security allow rule is implemented locally with no whole-file exemption and currently reports `SECURITY_SCAN_PASS`.
 
 ## External Blockers
 
-- Windows-only DPAPI, installed-user-data, license-gated API, Setup and launcher validation remain external to the Mac closure run.
+- Windows-only DPAPI, real license, paid image calls and manual installed-app checks require the Windows/customer test environment.
 
 BUILD_ALLOWED=false
 

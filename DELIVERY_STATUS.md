@@ -8,7 +8,7 @@ Windows CI workflow introduced at: `c969109a5968a232fda49892e5935ebe438db0af`
 
 Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
 
-Current phase: Windows GitHub Actions validation, installed-app closure and real-image handoff
+Current phase: Windows CI build-gate repair, installed-app closure and real-image handoff
 
 ## Completed
 
@@ -34,12 +34,17 @@ Current phase: Windows GitHub Actions validation, installed-app closure and real
 - P1 API integration blocker previously resolved: `4 passed, 6 deselected`.
 - Production license gate tests previously rerun: `12 passed`.
 - Real text smoke evidence exists for two articles with `used_local_fallback=false` and empty `fallback_kind`.
+- Windows run `30593120499` completed the full suite with `936 passed, 0 failed, 3 skipped`.
+- The earlier local claim of two Windows failures has no attached test names or stack traces and is superseded by the reproducible GitHub Actions result.
+- The Windows machine report records a successful Setup build, install, uninstall and `/api/health` 200.
+- The package scanner now uses exact runtime-token assignment rules; the whole-file `desktop_host.py` exemption has been removed and hardcoded-key regressions were added.
 
 ## Not Completed
 
-- First Windows Delivery CI run and diagnostic artifact review.
+- Green rerun of all Windows CI build gates after the package/runtime, launcher and Inno workflow fixes.
+- Installed-build DPAPI restart persistence and real license activation matrix.
 - Real image provider smoke with two validated generated images.
-- Final installed Windows customer flow: install, launch, activation, model setup, article+image generation, Word/ZIP export, restart recovery, uninstall.
+- Final installed Windows customer flow: real article+image generation, Word/ZIP inspection, restart/single-instance recovery.
 - Final Setup and customer delivery ZIP.
 
 ## Recent Test Results
@@ -60,7 +65,7 @@ Current phase: Windows GitHub Actions validation, installed-app closure and real
 - other: final log shows `135 passed`.
 - phase: last known `208 passed`.
 - Final Mac security scan: `SECURITY_SCAN_PASS`, `forbidden_hits=[]`, 353 files scanned.
-- Windows CI: triggered by the status handoff push; results and artifacts pending GitHub Actions execution.
+- Windows CI run `30593120499`: `936 passed, 3 skipped`; compileall and freeze verification passed. Launcher, portable package and Inno gates failed and are being repaired.
 
 ## Recent Real Smoke
 
@@ -70,21 +75,16 @@ Current phase: Windows GitHub Actions validation, installed-app closure and real
 
 ## Windows Handoff Checklist
 
-1. Pull `fix/r1.3-customer-delivery-final` and verify the restored freeze tag.
-2. Review the Windows Delivery CI run and download `windows-delivery-evidence-*`.
-3. Fix all CI failures without weakening DPAPI, license, security or package gates.
-4. Confirm the .NET SDK and repair the native launcher build.
-5. Resolve any `desktop_host.py` package-audit false positive without weakening the real secret gate.
-6. Run the complete Windows test suite and verify DPAPI and license flows.
-7. Build Setup; install; launch from the desktop; activate; save and test text/image model profiles.
-8. Refresh at least 200 live hotspots.
-9. Generate one real article with one cover and one inline image; validate both images.
-10. Export Word and ZIP; restart and verify history recovery and single-instance behavior.
-11. Uninstall and verify the intended user-data retention policy.
+1. Rerun Windows Delivery CI and require every automated gate to pass.
+2. On the newly built Setup, verify DPAPI text/image credentials across a full process restart.
+3. Verify unactivated, valid, invalid, device-bound and restart-persistent license states.
+4. Generate one real article with one cover and one inline image; validate both images.
+5. Open and inspect Word and ZIP, then verify restart recovery and single-instance behavior.
+6. Re-run uninstall and retained-user-data checks against the final Setup.
 
 ## Next Command
 
-`Review the Windows Delivery CI run for fix/r1.3-customer-delivery-final and download windows-delivery-evidence-*`
+`gh run watch --repo 329800187-design/hotsopt-article-agent --exit-status`
 
 ## Gates
 
