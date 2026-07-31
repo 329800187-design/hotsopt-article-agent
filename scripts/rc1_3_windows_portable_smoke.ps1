@@ -9,7 +9,7 @@ if (-not $Package) { throw "RC1.3/RC1.3.1/RC1.3.2/RC1.3.3/RC1.3.3-R1 Windows pac
 $Sandbox = Join-Path ([IO.Path]::GetTempPath()) ("rc1-3-portable-" + [guid]::NewGuid().ToString("N"))
 $ProgramDir = Join-Path $Sandbox "ProgramDir"
 $LocalAppData = Join-Path $Sandbox "LocalAppData"
-$ProductName = -join ([char[]](0x70ed,0x70b9,0x56fe,0x6587,0x5de5,0x4f5c,0x53f0))
+$ProductName = -join ([char[]](0x70ed,0x70b9,0x56fe,0x6587,0x6279,0x91cf,0x751f,0x4ea7,0x5de5,0x4f5c,0x53f0))
 New-Item -ItemType Directory -Force -Path $ProgramDir,$LocalAppData | Out-Null
 Expand-Archive -LiteralPath $Package.FullName -DestinationPath $ProgramDir -Force
 Get-ChildItem -LiteralPath $ProgramDir -Recurse -File | ForEach-Object { $_.IsReadOnly = $true }
@@ -96,5 +96,4 @@ foreach ($forbidden in @("data", "logs", "user-data", ".venv", "settings.json", 
     if (Test-Path -LiteralPath (Join-Path $ProgramDir $forbidden)) { throw "program directory contains user data: $forbidden" }
 }
 Write-Output "PORTABLE_LOCALAPPDATA_PASS"
-
 

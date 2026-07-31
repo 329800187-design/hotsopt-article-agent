@@ -286,7 +286,7 @@ def build_windows(source_zip: Path, output: Path) -> Path:
 运行包内置 64 位 Python 3.11 和所需依赖，不读取系统 Python，不调用 pip，不创建 venv。
 安装程序会检查 WebView2；缺少时使用包内官方 Evergreen Bootstrapper 静默安装。
 
-用户数据保存在 `%LOCALAPPDATA%\\热点图文工作台` 的 `config`、`data`、`exports`、`logs` 和 `cache` 目录，不会写入安装程序包。
+用户数据保存在 `%LOCALAPPDATA%\\热点图文批量生产工作台` 的 `config`、`data`、`exports`、`logs`、`license` 和 `cache` 目录，不会写入安装程序包。
 """.encode("utf-8")
     _add_bundled_runtime(entries)
     write_zip(output, entries)

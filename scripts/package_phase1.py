@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "hotspot-article-agent-phase1-final.zip"
 MANIFEST = ROOT / "hotspot-article-agent-phase1-final-manifest.json"
-ROOT_FILES = ["api.py", "app.py", "desktop_host.py", "launcher.ps1", "create_shortcut.ps1", "start.vbs", "install.bat", "start.bat", "stop.bat", "start-license-generator.bat", "requirements.txt", "requirements-runtime.txt", "requirements-dev.txt", "requirements-admin.txt", "README.md", "STATUS.md", "LICENSE", "TECH_AUDIT.md", "THIRD_PARTY_NOTICES.md", ".gitignore", "pytest.ini"]
+ROOT_FILES = ["api.py", "app.py", "desktop_host.py", "launcher.ps1", "start-dev.ps1", "create_shortcut.ps1", "start.vbs", "install.bat", "start.bat", "stop.bat", "start-license-generator.bat", "requirements.txt", "requirements-runtime.txt", "requirements-dev.txt", "requirements-admin.txt", "README.md", "STATUS.md", "LICENSE", "TECH_AUDIT.md", "THIRD_PARTY_NOTICES.md", ".gitignore", "pytest.ini"]
 ROOT_DIRS = ["config", "docs", "export", "generation", "hot_sources", "license_admin", "modules", "packaging", "providers", "research", "resources", "scripts", "tests", "ui"]
 SENSITIVE_PATTERNS = {
     "private_key_material": re.compile(r"-----BEGIN (:ENCRYPTED )" + "PRIVATE" + r" KEY-----|-----BEGIN RSA " + "PRIVATE" + r" KEY-----"),

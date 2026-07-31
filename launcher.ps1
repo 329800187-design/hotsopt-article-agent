@@ -3,8 +3,9 @@ $ErrorActionPreference = "Stop"
 # Compatibility entry point for shortcuts and existing portable packages.  The
 # desktop host owns all backend/window lifecycle and never opens an external URL.
 $Root = (Resolve-Path (Split-Path -Parent $MyInvocation.MyCommand.Path)).Path
-$ProductName = "热点图文工作台"
+$ProductName = "热点图文批量生产工作台"
 $env:HOTSPOT_DATA_ROOT = Join-Path ($env:LOCALAPPDATA) $ProductName
+$env:HOTSPOT_LAUNCH_MODE = "launcher"
 $env:HOTSPOT_NO_BROWSER = "1"
 $env:HOTSPOT_DESKTOP = "1"
 $env:PYTHONDONTWRITEBYTECODE = "1"

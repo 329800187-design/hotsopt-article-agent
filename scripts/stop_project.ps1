@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))).Path
-$ProductName = -join ([char[]](0x70ed,0x70b9,0x56fe,0x6587,0x5de5,0x4f5c,0x53f0))
+$ProductName = -join ([char[]](0x70ed,0x70b9,0x56fe,0x6587,0x6279,0x91cf,0x751f,0x4ea7,0x5de5,0x4f5c,0x53f0))
 $localData = Join-Path $env:LOCALAPPDATA $ProductName
-$dataRoot = if ($env:HOTSPOT_DATA_ROOT) { (Resolve-Path $env:HOTSPOT_DATA_ROOT).Path } elseif (Test-Path (Join-Path $Root "data\runtime")) { Join-Path $Root "data" } elseif (Test-Path (Join-Path $localData "runtime")) { $localData } else { Join-Path $Root "data" }
+$dataRoot = if ($env:HOTSPOT_DATA_ROOT) { [IO.Path]::GetFullPath($env:HOTSPOT_DATA_ROOT) } else { $localData }
 $RuntimeDir = Join-Path $dataRoot "runtime"
 $BundledPython = Join-Path $Root "runtime\python.exe"
 $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"

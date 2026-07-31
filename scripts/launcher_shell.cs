@@ -25,6 +25,10 @@ internal static class LauncherShell
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,
         };
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        startInfo.EnvironmentVariables["HOTSPOT_DATA_ROOT"] = Path.Combine(localAppData, "热点图文批量生产工作台");
+        startInfo.EnvironmentVariables["HOTSPOT_LAUNCH_MODE"] = "launcher";
+        startInfo.EnvironmentVariables["HOTSPOT_INSTALL_MODE"] = "1";
         try
         {
             Process process = Process.Start(startInfo);

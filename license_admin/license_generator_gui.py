@@ -6,27 +6,25 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from license_admin.license_generator import create_license, write_license
-from license_admin.signing_identity import SigningIdentityError, load_signing_private_key, private_key_path
+from license_admin.signing_identity import signer_preflight
 
 
 def main() -> None:
-    signing_error: SigningIdentityError | None = None
-    try:
-        load_signing_private_key()
-    except SigningIdentityError as exc:
-        signing_error = exc
+    preflight = signer_preflight()
 
     root = tk.Tk()
     root.title("离线许可证签发")
     fields: dict[str, tk.Entry] = {}
     status_var = tk.StringVar(value="")
 
-    if signing_error is not None:
+    if not preflight["ready"]:
         status_var.set(
-            "未找到可用签发私钥，工具已启动但暂不能签发。\n"
-            f"请将私钥放到：{private_key_path()}\n"
-            f"错误信息：{signing_error}"
+            f"错误编号：{preflight['code']}\n"
+            f"{preflight['message']}\n"
+            f"私钥查找路径：{preflight['private_key_path']}"
         )
+    else:
+        status_var.set("LICENSE_SIGNER_READY：签发身份预检通过。")
 
     labels = (
         ("客户名称", "customer"),
@@ -66,7 +64,29 @@ def main() -> None:
             status_var.set(f"无法生成许可证：{exc}")
             messagebox.showerror("无法生成许可证", str(exc))
 
-    tk.Button(root, text="生成许可证", command=generate).grid(row=len(labels) + 1, column=1, padx=8, pady=12, sticky="e")
+    def copy_diagnostic() -> None:
+        diagnostic = "\n".join(
+            (
+                f"错误码={preflight['code']}",
+                f"私钥查找路径={preflight['private_key_path']}",
+                f"私钥是否存在={preflight['private_key_exists']}",
+                f"公钥路径={preflight['public_key_path']}",
+                f"公私钥是否匹配={preflight['keypair_matches']}",
+                f"应用版本={preflight['app_version']}",
+                f"构建提交={preflight['build_commit']}",
+            )
+        )
+        root.clipboard_clear()
+        root.clipboard_append(diagnostic)
+        status_var.set("签发诊断已复制，不包含私钥内容。")
+
+    tk.Button(root, text="复制签发诊断", command=copy_diagnostic).grid(row=len(labels) + 1, column=0, padx=8, pady=12, sticky="w")
+    tk.Button(
+        root,
+        text="生成许可证",
+        command=generate,
+        state=tk.NORMAL if preflight["ready"] else tk.DISABLED,
+    ).grid(row=len(labels) + 1, column=1, padx=8, pady=12, sticky="e")
     root.mainloop()
 
 

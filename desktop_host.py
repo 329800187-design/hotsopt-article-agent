@@ -26,9 +26,10 @@ from typing import Callable
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from modules.app_metadata import APP_SHORT_NAME, DATA_DIR_NAME
 from modules.app_version import APP_VERSION
 
-PRODUCT_NAME = "热点图文工作台"
+PRODUCT_NAME = APP_SHORT_NAME
 WINDOW_TITLE = "热点图文批量生产工作台"
 MUTEX_NAME = "Local\\HotspotArticleAgentProduct"
 PREFERRED_WEB_PORT = 8505
@@ -246,8 +247,8 @@ def _is_installed_dir(root: Path) -> bool:
 def _installed_user_data_root() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA", "")
     if local_app_data:
-        return Path(local_app_data) / "热点图文批量生产工作台"
-    return Path.home() / "AppData" / "Local" / "热点图文批量生产工作台"
+        return Path(local_app_data) / DATA_DIR_NAME
+    return Path.home() / "AppData" / "Local" / DATA_DIR_NAME
 
 
 def _migrate_installed_config(install_root: Path, user_data_root: Path) -> str:
@@ -284,12 +285,9 @@ class DesktopHost:
     def __init__(self, root: Path | None = None) -> None:
         self.root = (root or Path(__file__).resolve().parent).resolve()
         self._installed = _is_installed_dir(self.root)
-        if self._installed:
-            self.data_root = _installed_user_data_root()
-        else:
-            self.data_root = self.root / "data"
-        if os.environ.get("HOTSPOT_DATA_ROOT"):
-            self.data_root = Path(os.environ["HOTSPOT_DATA_ROOT"]).expanduser().resolve()
+        from modules.app_paths import data_root
+
+        self.data_root = data_root()
         self.runtime_root = self.data_root / "runtime"
         self.logs_root = self.data_root / "logs"
         self.startup_log = self.logs_root / "startup.log"
@@ -310,6 +308,9 @@ class DesktopHost:
     def prepare_environment(self) -> None:
         if self._installed:
             os.environ["HOTSPOT_INSTALL_MODE"] = "1"
+            os.environ["HOTSPOT_LAUNCH_MODE"] = "installed"
+        else:
+            os.environ.setdefault("HOTSPOT_LAUNCH_MODE", "source")
         os.environ["HOTSPOT_DATA_ROOT"] = str(self.data_root)
         os.environ["HOTSPOT_DESKTOP"] = "1"
         os.environ["HOTSPOT_NO_BROWSER"] = "1"

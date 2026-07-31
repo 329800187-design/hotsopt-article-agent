@@ -9,7 +9,7 @@ command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File """ & root & 
 exitCode = shell.Run(command, 0, True)
 
 If exitCode <> 0 Then
-    productDir = ChrW(&H70ED) & ChrW(&H70B9) & ChrW(&H56FE) & ChrW(&H6587) & ChrW(&H5DE5) & ChrW(&H4F5C) & ChrW(&H53F0)
+    productDir = ChrW(&H70ED) & ChrW(&H70B9) & ChrW(&H56FE) & ChrW(&H6587) & ChrW(&H6279) & ChrW(&H91CF) & ChrW(&H751F) & ChrW(&H4EA7) & ChrW(&H5DE5) & ChrW(&H4F5C) & ChrW(&H53F0)
     logPath = shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\" & productDir & "\logs\launcher.log"
     MsgBox "Workbench failed to start. Check the launcher log:" & vbCrLf & logPath, 16, "Hotspot Article Agent"
 End If

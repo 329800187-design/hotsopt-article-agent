@@ -16,12 +16,12 @@ sys.path.insert(0, str(ROOT))
 
 from scripts import build_rc1_3_1 as base
 import package_phase1
-RELEASE = "RC1.3.3-Lite-P1-HF4.1-R1.2"
-STATUS = "RC1.3.3-Lite-P1-HF4.1-R1.2 手动话题、真实文本生成与桌面导出热修完成，等待用户最后一次文章和图片复测。"
+from modules.app_metadata import APP_VERSION, DATA_DIR_NAME, LICENSE_ADMIN_EXE_NAME, PRODUCT_NAME
+RELEASE = APP_VERSION
+STATUS = f"{APP_VERSION} Issue #1 自动化修复完成，等待 Windows 真实设备身份与许可证闭环复测。"
 PRODUCT = f"\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0_{RELEASE}"
-APP_NAME = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0"
+APP_NAME = PRODUCT_NAME
 APP_EXE = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0.exe"
-DATA_DIR_NAME = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0"
 INSTALL_DIR_NAME = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0"
 APP_ID = "{A90DB560-9C16-47D2-8AE9-HOTSPOTARTICLE}"
 STALE_INSTALL_DIR = Path("E:/\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0")
@@ -460,7 +460,7 @@ def build_license_admin_package(output: Path) -> Path:
     for source in (ROOT / "resources" / "license_public_key.pem", ROOT / "start-license-generator.bat", ROOT / "requirements-admin.txt"):
         if source.is_file():
             entries[source.relative_to(ROOT).as_posix()] = source.read_bytes()
-    exe = ROOT / "热点图文工作台_本地许可证签发工具.exe"
+    exe = ROOT / LICENSE_ADMIN_EXE_NAME
     if exe.is_file():
         entries[exe.name] = exe.read_bytes()
     entries["使用说明.txt"] = (
@@ -518,6 +518,15 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     configure_clean_runtime_environment()
+    try:
+        build_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    except (OSError, subprocess.SubprocessError):
+        build_commit = os.environ.get("GITHUB_SHA", "unknown")
+    build_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    (ROOT / "modules" / "build_metadata.json").write_text(
+        json.dumps({"app_version": APP_VERSION, "build_commit": build_commit, "build_time_utc": build_time}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     native_dir = ROOT / "build" / "native-r228-p1"
     launcher, _setup_stub = base.build_native(native_dir)
@@ -566,8 +575,8 @@ def main() -> int:
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    license_admin_exe = build_license_admin_exe(ROOT / "热点图文工作台_本地许可证签发工具.exe")
-    license_admin_zip = build_license_admin_package(ROOT / "热点图文工作台_本地许可证签发工具.zip")
+    license_admin_exe = build_license_admin_exe(ROOT / LICENSE_ADMIN_EXE_NAME)
+    license_admin_zip = build_license_admin_package(ROOT / f"{Path(LICENSE_ADMIN_EXE_NAME).stem}.zip")
 
     report = ROOT / "HF4.1-R1.2_最终构建报告.md"
     report.write_text(

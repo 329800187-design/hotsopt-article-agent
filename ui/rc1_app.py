@@ -24,7 +24,7 @@ from modules.device_identity import device_status
 from modules.license_schema import LicenseValidationError
 from modules.license_service import check_license, check_system_time, clock_status, import_license, import_license_text, license_error_message, recover_clock_rollback
 from generation.image_budget import calculate_image_budget, image_cost_preview, normalize_image_plan, recommended_word_count
-from modules.app_version import APP_SHORT_NAME, APP_VERSION, BUILD_TIME_UTC, PRODUCT_NAME, diagnostic_info
+from modules.app_version import APP_SHORT_NAME, APP_VERSION, BUILD_COMMIT, BUILD_TIME_UTC, PRODUCT_NAME, diagnostic_info
 from providers.errors import user_facing_error_message
 from providers.registry import ui_presets
 from ui.components import friendly_error, show_progress, stage_label
@@ -1412,7 +1412,8 @@ def _content(restricted: bool = False) -> None:
 
 def _render_restricted_app(settings: dict[str, Any], save_settings: Any, root: Path) -> None:
     _render_license_activation(root)
-    st.info("当前授权不可用，已有内容仍可查看、编辑和导出。导入有效许可证后即可继续生成。")
+    st.warning("当前软件尚未激活，因此模型设置和正式生成暂时锁定。请先复制设备码并完成许可证激活。")
+    st.info("已有内容仍可查看、编辑和导出。导入有效许可证后会自动退出受限模式。")
     with st.sidebar:
         st.image(str(root / "ui" / "assets" / "logo-light.svg"), width=116)
         st.markdown("### 热点图文工作台")
@@ -1926,8 +1927,29 @@ def _render_license_activation(root: Path) -> None:
     st.title("欢迎使用热点图文批量生产工作台")
     st.info("请复制设备码发送给软件提供方，收到激活码后粘贴到下方完成激活。")
     if device.get("device_identity_unavailable"):
-        st.error("暂时无法读取设备信息，请以管理员身份重新打开软件或联系软件提供方。")
+        error_code = str(device.get("installation_error") or "IDENTITY_INITIALIZATION_FAILED")
+        st.error(f"暂时无法生成设备码。\n\n错误编号：{error_code}")
         device_value = ""
+        safe_diagnostic = {
+            "error_code": error_code,
+            "message": str(device.get("message") or ""),
+            "data_root": str(device.get("data_root") or ""),
+            "license_root": str(device.get("license_root") or ""),
+            "launch_mode": str(device.get("launch_mode") or ""),
+            "writable": bool(device.get("writable")),
+            "legacy_detected": bool(device.get("legacy_detected")),
+            "migration_performed": bool(device.get("migration_performed")),
+            "app_version": APP_VERSION,
+            "build_commit": BUILD_COMMIT,
+        }
+        diagnostic_text = json.dumps(safe_diagnostic, ensure_ascii=False, indent=2)
+        diagnostic_left, diagnostic_right = st.columns(2)
+        if diagnostic_left.button("重新检测设备信息", use_container_width=True):
+            st.rerun()
+        if diagnostic_right.button("复制诊断信息", use_container_width=True):
+            st.success("诊断信息已复制" if _write_clipboard_text(diagnostic_text) else "复制失败，请展开后手动复制")
+        with st.expander("查看安全诊断", expanded=False):
+            st.code(diagnostic_text, language="json")
     else:
         device_value = str(device.get("device_code") or "")
     st.text_input("当前设备码", value=device_value, disabled=True)
