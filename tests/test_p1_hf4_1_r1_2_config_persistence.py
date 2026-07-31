@@ -276,6 +276,7 @@ def test_is_installed_env_var():
 def test_license_root_in_install_mode():
     """license_root should resolve to user data dir in install mode."""
     old_install = os.environ.pop("HOTSPOT_INSTALL_MODE", None)
+    old_data_root = os.environ.pop("HOTSPOT_DATA_ROOT", None)
     try:
         os.environ["HOTSPOT_INSTALL_MODE"] = "1"
         lr = _ap.license_root()
@@ -287,3 +288,5 @@ def test_license_root_in_install_mode():
         os.environ.pop("HOTSPOT_INSTALL_MODE", None)
         if old_install:
             os.environ["HOTSPOT_INSTALL_MODE"] = old_install
+        if old_data_root:
+            os.environ["HOTSPOT_DATA_ROOT"] = old_data_root
