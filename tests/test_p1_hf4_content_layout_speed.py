@@ -256,7 +256,7 @@ def test_SOURCE_OVERLAP_NO_AUTO_REWRITE_PASS(monkeypatch: pytest.MonkeyPatch, tm
     assert calls["count"] == 1
 
 
-def test_WORD_OMITS_SOURCE_AND_AI_SECTIONS_PASS(tmp_path: Path):
+def test_WORD_INCLUDES_SOURCE_AND_OMITS_AI_SECTIONS_PASS(tmp_path: Path):
     body = "这是一段用于 Word 导出的正文内容，能够稳定通过段落检查并保留来源格式。" * 30
     article = _article("Word 导出测试", body)
     output = export_article(article, tmp_path / "hf4.docx")
@@ -264,8 +264,8 @@ def test_WORD_OMITS_SOURCE_AND_AI_SECTIONS_PASS(tmp_path: Path):
     paragraphs = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
     all_text = "\n".join(paragraphs)
     assert paragraphs[0] == "Word 导出测试"
-    assert "资料来源" not in paragraphs
-    assert "原文链接：" not in all_text
+    assert "资料来源" in paragraphs
+    assert "原文链接：" in all_text
     assert "AI辅助声明" not in all_text
 
 

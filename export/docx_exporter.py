@@ -11,6 +11,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 from generation.image_budget import count_body_chinese_chars
+from generation.content_quality import contamination_hits
 from export.layout_pipeline import prepare_article_layout
 
 DEFAULT_FONT = "宋体"
@@ -99,7 +100,18 @@ def ensure_article_ready_for_docx_export(article: dict[str, Any] | None) -> None
     title = str(article.get("title") or "").strip()
     body_markdown = _body_markdown_from_sections(article)
     body_char_count = int(article.get("body_char_count") or count_body_chinese_chars(article) or 0)
-    if not title or not body_markdown or body_char_count <= 0:
+    quality_gate = article.get("quality_gate") if isinstance(article.get("quality_gate"), dict) else {}
+    if (
+        not title
+        or not body_markdown
+        or body_char_count <= 0
+        or article.get("used_local_fallback")
+        or article.get("fallback_kind")
+        or article.get("article_quality_blocked")
+        or str(article.get("recommended_status") or "") in {"retry_required", "quality_blocked"}
+        or str(quality_gate.get("status") or "") == "failed"
+        or contamination_hits(str(article.get("content_markdown") or body_markdown))
+    ):
         raise ValueError(f"ARTICLE_NOT_READY: {ARTICLE_NOT_READY_MESSAGE}")
 
 
@@ -221,6 +233,13 @@ def _add_article_content(document: Document, article: dict[str, Any], base_dir: 
         paragraph = document.add_paragraph("关键词：" + "、".join(str(item) for item in keywords))
         paragraph.paragraph_format.first_line_indent = Pt(0)
         _set_paragraph_font(paragraph, DEFAULT_FONT, 11)
+
+    sources = [str(item).strip() for item in (article.get("source_list") or []) if str(item).strip()][:5]
+    if sources:
+        title = document.add_paragraph("资料来源", style="Heading 1")
+        _set_paragraph_font(title, TITLE_FONT, 15, bold=True)
+        for source in sources:
+            _add_source_paragraph(document, source)
 
 
 

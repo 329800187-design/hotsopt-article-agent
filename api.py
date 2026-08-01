@@ -1081,6 +1081,8 @@ def _ensure_state_article_ready_for_export(state: dict[str, Any] | None) -> dict
         not title
         or not body_markdown
         or body_char_count <= 0
+        or article.get("used_local_fallback")
+        or article.get("fallback_kind")
         or gate_status in {"", "not_checked", "failed"}
         or hard_error_count > 0
     ):
