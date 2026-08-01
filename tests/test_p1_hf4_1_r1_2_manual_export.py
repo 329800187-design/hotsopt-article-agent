@@ -82,6 +82,12 @@ def _method_article(topic: HotTopic) -> dict:
         {"heading": "风险提醒", "body": "不要承诺稳定高收入，不要使用未授权素材，不要把模型结果不经检查直接交付。工具订阅、时间成本和返工风险都要提前算清楚。", "image_brief": "风险控制"},
         {"heading": "总结", "body": "先从一项简单服务跑通闭环，比同时学习很多工具更重要。有了真实反馈后，再逐步提高报价、扩展服务和自动化程度。", "image_brief": "总结"},
     ]
+    def filler(seed: int, length: int = 190) -> str:
+        return "".join(chr(0x4E00 + ((seed * 3001 + index * (71 + seed * 2)) % 20000)) for index in range(length))
+
+    for index, item in enumerate(sections, start=1):
+        item["body"] += filler(index)
+
     source = f"[1] 手动输入：《{topic.title}》，\n原文链接："
     markdown = "\n\n".join(
         [f"# {topic.title}，真正可落地的几条路径", "导语：这篇文章面向没有技术背景的普通读者，梳理使用AI获得收入的可执行路径、交付步骤和风险边界。"]
@@ -142,27 +148,23 @@ def test_MANUAL_TOPIC_ZERO_SOURCE_USES_TEXT_MODEL_METHOD_ARTICLE_AND_WORD(tmp_pa
     assert Document(output).paragraphs[0].text == result["article"]["title"]
 
 
-def test_MANUAL_TOPIC_TIMEOUT_USES_CUSTOM_TOPIC_FALLBACK_AND_EXPORTS(tmp_path: Path, monkeypatch):
+def test_MANUAL_TOPIC_TIMEOUT_REQUIRES_TEXT_RETRY(tmp_path: Path, monkeypatch):
     topic = _manual_topic("r1-2-manual-timeout")
     result = _run(tmp_path, monkeypatch, topic, lambda *args, **kwargs: (_ for _ in ()).throw(ProviderError("TIMEOUT", "model timeout")))
-    article = result["article"]
-    markdown = article["content_markdown"]
-    assert result["status"] == "completed"
-    assert result["fallback_kind"] == "custom_topic_fallback"
+    assert result["status"] == "failed"
+    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
     assert result["provider_error_code"] == "TIMEOUT"
-    assert "本篇未使用文本模型正式正文" in result["fallback_notice"]
-    assert all(word not in markdown for word in ("热榜", "事件概览", "等待权威信息确认", "事件发生了什么"))
-    assert "核心概念" in markdown and "可执行方法" in markdown and "风险提醒" in markdown
-    assert export_article(article, tmp_path / "manual-fallback.docx").is_file()
+    assert result["retryable"] is True
+    assert result["article"] is None
 
 
-def test_HOTLIST_ZERO_SOURCE_STILL_USES_HOTLIST_LIMITED(tmp_path: Path, monkeypatch):
+def test_HOTLIST_ZERO_SOURCE_TIMEOUT_REQUIRES_TEXT_RETRY(tmp_path: Path, monkeypatch):
     topic = _hotlist_topic()
     result = _run(tmp_path, monkeypatch, topic, lambda *args, **kwargs: (_ for _ in ()).throw(ProviderError("TIMEOUT", "model timeout")))
-    assert result["status"] == "completed"
+    assert result["status"] == "failed"
+    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
     assert result["research_bundle"]["research_status"] == "hotlist_limited"
-    assert result["article"]["fallback_kind"] == "hotlist_limited_draft"
-    assert "事件概览" in result["article"]["content_markdown"]
+    assert result["article"] is None
 
 
 def test_DESKTOP_DOWNLOADS_AND_WORD_ZIP_EXPORT_GATES(tmp_path: Path):
@@ -201,26 +203,25 @@ def test_TEXT_KEY_LOAD_FAILED_WHEN_SAVED_KEY_FLAG_BUT_EMPTY_SECRET(tmp_path: Pat
     assert result["error_code"] == "TEXT_KEY_LOAD_FAILED"
 
 
-def test_CUSTOM_TOPIC_SHORT_MODEL_OUTPUT_AUTO_EXPANDS_TO_FALLBACK_AND_WORD(tmp_path: Path, monkeypatch):
-    """主链：手动话题 + 模型返回短文(<700字) → 自动扩写 → completed/warning + article非空 + gate≠failed + Word可导出"""
+def test_CUSTOM_TOPIC_SHORT_MODEL_OUTPUT_REQUIRES_TEXT_RETRY(tmp_path: Path, monkeypatch):
+    """Custom topic + too-short model output should not become a formal exportable fallback."""
     topic = _manual_topic("r1-2-short-expand")
     seen = {}
 
     def fake_generate_short(topic, angle, article_type, style, word_count, profile, **kwargs):
         seen["called"] = True
         seen["api_key"] = profile.get("api_key")
-        # Simulate model returning a very short article (well under 700 chars)
         return {
-            "title": f"{topic.title}的简短思考",
-            "intro": "AI赚钱是可行的。",
+            "title": f"{topic.title}\u7684\u7b80\u77ed\u601d\u8003",
+            "intro": "AI\u8d5a\u94b1\u662f\u53ef\u884c\u7684\u3002",
             "summary": topic.summary,
             "sections": [
-                {"heading": "核心概念", "body": "用AI赚钱就是卖服务。", "image_brief": "概念"},
-                {"heading": "方法", "body": "多尝试多学习。", "image_brief": "方法"},
+                {"heading": "\u6838\u5fc3\u6982\u5ff5", "body": "\u7528AI\u8d5a\u94b1\u5c31\u662f\u5356\u670d\u52a1\u3002", "image_brief": "\u6982\u5ff5"},
+                {"heading": "\u65b9\u6cd5", "body": "\u591a\u5c1d\u8bd5\u591a\u5b66\u4e60\u3002", "image_brief": "\u65b9\u6cd5"},
             ],
-            "content_markdown": f"# {topic.title}\n\nAI赚钱可行。\n\n## 核心概念\n用AI赚钱就是卖服务。\n\n## 方法\n多尝试多学习。",
+            "content_markdown": f"# {topic.title}\n\nAI\u8d5a\u94b1\u53ef\u884c\u3002",
             "source_list": [],
-            "ai_statement": "AI辅助声明",
+            "ai_statement": "AI\u8f85\u52a9\u58f0\u660e",
             "fact_basis": [],
             "recommended_status": "completed",
             "text_generation_calls": 1,
@@ -228,34 +229,10 @@ def test_CUSTOM_TOPIC_SHORT_MODEL_OUTPUT_AUTO_EXPANDS_TO_FALLBACK_AND_WORD(tmp_p
         }
 
     result = _run(tmp_path, monkeypatch, topic, fake_generate_short)
-    article = result["article"]
-    markdown = article["content_markdown"]
-
-    # Core invariants: must not fail
-    assert result["status"] in ("completed", "warning"), f"Expected completed/warning, got {result['status']}"
-    assert result["article"] is not None
-    assert result["quality_gate"]["status"] != "failed", f"Quality gate must not be failed: {result['quality_gate']}"
-
-    # Auto-expand evidence
-    assert result["fallback_kind"] == "custom_topic_expanded"
-    assert "BODY_TOO_SHORT_EXPANDED" in str(result.get("fallback_reason", "")) or "BODY_TOO_SHORT_EXPANDED" in str(article.get("fallback_reason", ""))
-    assert result["fallback_notice"]  # should have a notice about expansion
-
-    # Method article structure
-    assert "核心概念" in markdown
-    assert "可执行方法" in markdown
-    assert "具体步骤" in markdown
-    assert "风险提醒" in markdown
-    assert "总结" in markdown
-
-    # Body length >= 700
-    from generation.image_budget import count_body_chinese_chars
-    body_chars = count_body_chinese_chars(article)
-    assert body_chars >= 700, f"Expanded body must be >= 700, got {body_chars}"
-
-    # Word export
-    output = export_article(article, tmp_path / "short-expand.docx")
-    assert Document(output).paragraphs[0].text == article["title"]
+    assert seen["called"] is True
+    assert result["status"] == "failed"
+    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+    assert result["article"] is None
 
 
 def _seed_export_state(tmp_path: Path, monkeypatch, *, task_status: str = "completed", article: dict | None = None, gate: dict | None = None):

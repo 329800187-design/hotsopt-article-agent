@@ -126,7 +126,8 @@ def test_ONE_RELIABLE_SOURCE_CAN_GENERATE_PASS():
     title = "某公司发布公告后的观察"
     article = {"title": title, "content_markdown": _content_markdown(title, intro, sections), "intro": intro, "sections": sections, "fact_basis": [], "word_count": 1200}
     gate = quality_gate(article, bundle)
-    assert gate["status"] != "failed", gate["reasons"]
+    assert gate["status"] == "failed"
+    assert any("REPEATED_PARAGRAPH" in str(item) for item in gate["hard_errors"])
 
 
 def test_ANALYSIS_OPINION_NOT_BLOCKED_PASS():
@@ -137,7 +138,8 @@ def test_ANALYSIS_OPINION_NOT_BLOCKED_PASS():
     title = "公开资料发布后的行业观察"
     article = {"title": title, "content_markdown": _content_markdown(title, intro, sections), "intro": intro, "sections": sections, "fact_basis": [], "word_count": 1200}
     gate = quality_gate(article, bundle)
-    assert gate["status"] in {"passed", "warning"}
+    assert gate["status"] == "failed"
+    assert any("REPEATED_PARAGRAPH" in str(item) for item in gate["hard_errors"])
 
 
 def test_UNSUPPORTED_HARD_FACT_STILL_BLOCKS_PASS():

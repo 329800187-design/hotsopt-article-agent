@@ -803,29 +803,25 @@ class TestArticleParseErrorModelOutputEmptyFallback:
             store=store,
         )
 
-    def test_article_parse_error_enters_fallback_and_produces_article(self, tmp_path, monkeypatch):
-        """ARTICLE_PARSE_ERROR → fallback → task completed or warning → article not empty."""
-        result = self._run_with_error(tmp_path, monkeypatch, "ARTICLE_PARSE_ERROR", "模型未返回可读正文")
-        assert result["status"] in ("completed", "partial_success")
+    def test_article_parse_error_requires_text_retry(self, tmp_path, monkeypatch):
+        """ARTICLE_PARSE_ERROR should preserve research and require a text retry."""
+        result = self._run_with_error(tmp_path, monkeypatch, "ARTICLE_PARSE_ERROR", "\u6a21\u578b\u672a\u8fd4\u56de\u53ef\u8bfb\u6b63\u6587")
+        assert result["status"] == "failed"
+        assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
         assert result["provider_error_code"] == "ARTICLE_PARSE_ERROR"
         assert result["text_generation_result"] == "fallback"
-        # fallback article must be present
-        article = result.get("article") or {}
-        assert article, "fallback article must not be empty"
-        assert article.get("content_markdown"), "content_markdown must not be empty"
-        assert article.get("title"), "title must not be empty"
-        assert article.get("sections") and len(article.get("sections") or []) >= 1
+        assert result["retryable"] is True
+        assert result.get("article") is None
 
-    def test_model_output_empty_enters_fallback_and_produces_article(self, tmp_path, monkeypatch):
-        """MODEL_OUTPUT_EMPTY → fallback → task completed or warning → article not empty."""
+    def test_model_output_empty_requires_text_retry(self, tmp_path, monkeypatch):
+        """MODEL_OUTPUT_EMPTY should preserve research and require a text retry."""
         result = self._run_with_error(tmp_path, monkeypatch, "MODEL_OUTPUT_EMPTY", "text model returned reasoning_content but no content")
-        assert result["status"] in ("completed", "partial_success")
+        assert result["status"] == "failed"
+        assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
         assert result["provider_error_code"] == "MODEL_OUTPUT_EMPTY"
         assert result["text_generation_result"] == "fallback"
-        article = result.get("article") or {}
-        assert article, "fallback article must not be empty"
-        assert article.get("content_markdown"), "content_markdown must not be empty"
-        assert article.get("title"), "title must not be empty"
+        assert result["retryable"] is True
+        assert result.get("article") is None
 
     def test_non_whitelisted_error_still_raises(self, tmp_path, monkeypatch):
         """Unknown error codes NOT in whitelist must still raise → task fails."""

@@ -287,10 +287,12 @@ def test_MODEL_TIMEOUT_LOCAL_FALLBACK_PASS(monkeypatch: pytest.MonkeyPatch, tmp_
 
     result = single_task.run_single_task(task, text_profile, image_profile, settings={"network": {}, "image_plan_mode": "none"}, store=store)
 
-    assert result["status"] == "completed"
-    assert CN_FALLBACK_NOTICE in str(result.get("fallback_notice") or "")
-    assert int(result.get("text_generation_calls") or 0) <= 1
-    assert "##" in str(result["article"].get("content_markdown") or "")
+    assert result["status"] == "failed"
+    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+    assert result["provider_error_code"] == "TIMEOUT"
+    assert result["retryable"] is True
+    assert result["article"] is None
+    assert result.get("fallback_notice")
 
 
 def test_IMAGE_DELAY_DOES_NOT_BLOCK_WORD_PASS(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):

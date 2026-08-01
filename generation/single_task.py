@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from export.cover_builder import add_cover_title
-from generation.article_generator import CUSTOM_TOPIC_SECTION_HEADINGS, REQUIRED_SECTION_HEADINGS, _apply_short_article_rewrite, _rewrite_min_chars, _prompt, generate_article, plan_for_topic
+from generation.article_generator import CUSTOM_TOPIC_SECTION_HEADINGS, REQUIRED_SECTION_HEADINGS, _apply_quality_issue_rewrite, _apply_short_article_rewrite, _rewrite_min_chars, _prompt, generate_article, plan_for_topic
 from generation.image_prompt_generator import build_cover_prompt
 from generation.image_budget import calculate_image_budget, count_body_chinese_chars, image_plan_for, normalize_image_plan, recommended_word_count
 from generation.content_quality import quality_gate, sanitize_article_hard_facts
@@ -1161,15 +1161,37 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                     raise
                 used_fallback = True
                 state["text_generation_result"] = "fallback"
-                if custom_topic_mode:
-                    article = _build_custom_topic_fallback_article(topic, angle, article_type, style, exc.code)
-                    state["fallback_notice"] = "本篇未使用文本模型正式正文\n原因：文本模型调用失败，当前展示可编辑基础框架。建议检查模型配置后点击“使用文本模型重新生成”。"
-                else:
-                    article = _build_local_fallback_article(topic, angle, article_type, style, bundle, exc.code)
-                if limited_research_mode:
-                    state["fallback_notice"] = "已生成谨慎基础稿\n当前仅获取到热榜元数据，发布前请补充核对权威来源。"
-                elif not custom_topic_mode:
-                    state["fallback_notice"] = "\u5df2\u751f\u6210\u57fa\u7840\u7a3f\n\u5f53\u524d\u6a21\u578b\u8fd4\u56de\u5f02\u5e38\uff0c\u8f6f\u4ef6\u5df2\u6839\u636e\u516c\u5f00\u8d44\u6599\u751f\u6210\u53ef\u7f16\u8f91\u7248\u672c\u3002"
+                retry_message = "公开资料已保存，但正文模型返回异常，请重新生成正文。资料不会丢失。"
+                gate = {
+                    "status": "failed",
+                    "passed": False,
+                    "hard_error_count": 1,
+                    "warning_count": 0,
+                    "hard_errors": ["ARTICLE_TEXT_RETRY_REQUIRED"],
+                    "warnings": [],
+                    "reasons": ["ARTICLE_TEXT_RETRY_REQUIRED", str(exc.code)],
+                    "metrics": {"source_count": accepted_source_count},
+                }
+                state["research_bundle"] = sanitize_json(bundle or {})
+                state["quality_gate"] = sanitize_json(gate)
+                state["article"] = None
+                state["cover"] = None
+                state["inline_images"] = []
+                state["inline_image_summary"] = {"total": 0, "completed": 0, "failed": 0, "pending": 0, "status": "blocked"}
+                state["fallback_notice"] = retry_message
+                state.update({
+                    "status": "failed",
+                    "stage": "generating_article",
+                    "progress": 35,
+                    "failed_step": "generating_article",
+                    "error_code": "ARTICLE_TEXT_RETRY_REQUIRED",
+                    "safe_error_message": retry_message,
+                    "retryable": True,
+                    "used_local_fallback": False,
+                    "fallback_kind": "",
+                    "image_usage": {"generation_calls": 0, "paid_calls": 0, "retry_calls": 0, "budget_exceeded": False},
+                })
+                return _persist(state, store)
 
             def _finalize_article_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
                 payload["summary"] = str(payload.get("summary") or payload.get("intro") or topic.summary or "").strip()
@@ -1214,6 +1236,41 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                 article, removed_claims = _finalize_article_payload(article)
             overlap_report = analyze_source_overlap(article, bundle)
             gate = quality_gate(article, bundle)
+            if (
+                run_article
+                and str(gate.get("status") or "") == "failed"
+                and not bool(used_fallback or article.get("used_local_fallback"))
+                and int(generation_stats.get("text_generation_calls") or 0) < int(generation_stats.get("text_generation_limit") or 3)
+            ):
+                required_headings = CUSTOM_TOPIC_SECTION_HEADINGS if custom_topic_mode else REQUIRED_SECTION_HEADINGS
+                issue_rewrite_provider = OpenAITextProvider(effective_text_profile, network_settings=settings.get("network"))
+                try:
+                    article, rewrite_diagnostic = _apply_quality_issue_rewrite(
+                        provider=issue_rewrite_provider,
+                        topic=topic,
+                        angle=angle,
+                        article_type=article_type,
+                        style=style,
+                        requested_word_count=word_count,
+                        article=article,
+                        issue_list=[str(item) for item in (gate.get("hard_errors") or gate.get("reasons") or [])],
+                        required_headings=required_headings,
+                        research_bundle=bundle,
+                        stats=generation_stats,
+                    )
+                    if rewrite_diagnostic:
+                        state["text_http_status"] = int(rewrite_diagnostic.get("http_status") or state.get("text_http_status") or 0)
+                        state["text_content_type"] = str(rewrite_diagnostic.get("content_type") or state.get("text_content_type") or "")
+                        state["provider_parser_mode"] = str(rewrite_diagnostic.get("parser_mode") or state.get("provider_parser_mode") or "")
+                        article["text_http_status"] = state["text_http_status"]
+                        article["text_content_type"] = state["text_content_type"]
+                        article["provider_parser_mode"] = state["provider_parser_mode"]
+                    article, removed_claims = _finalize_article_payload(article)
+                    overlap_report = analyze_source_overlap(article, bundle)
+                    gate = quality_gate(article, bundle)
+                except Exception as rewrite_error:
+                    article["quality_rewrite_failed"] = True
+                    article["quality_rewrite_error"] = redact_sensitive_text(str(rewrite_error))[:240]
             overlap_warning = ""
             if overlap_report.get("status") != "passed":
                 overlap_warning = "\u5185\u5bb9\u5df2\u751f\u6210\uff0c\u4f46\u4e0e\u6765\u6e90\u8868\u8fbe\u4ecd\u8f83\u63a5\u8fd1\uff0c\u5efa\u8bae\u4eba\u5de5\u4fee\u6539\u540e\u53d1\u5e03\u3002"
@@ -1228,25 +1285,21 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
             article["source_overlap_check"] = sanitize_json(overlap_report)
             # ── 质量门一致性：failed 不得继续标 completed ──
             if str(gate.get("status") or "") == "failed":
-                if bool(used_fallback or article.get("used_local_fallback")):
-                    warnings = list(gate.get("warnings") or []) + list(gate.get("hard_errors") or [])
-                    gate = {**gate, "status": "warning", "passed": True, "warnings": list(dict.fromkeys(warnings)), "hard_errors": [], "hard_error_count": 0}
-                    article["recommended_status"] = "review_required"
-                    article["review_required"] = True
-                else:
-                    state["research_bundle"] = sanitize_json(bundle or {})
-                    state["quality_gate"] = sanitize_json(gate)
-                    failed_reasons = "；".join(gate.get("hard_errors", []) or gate.get("reasons", []))
-                    state.update({
-                        "status": "failed",
-                        "stage": "quality_gate",
-                        "progress": 45,
-                        "failed_step": "quality_gate",
-                        "error_code": "QUALITY_GATE_FAILED",
-                        "safe_error_message": failed_reasons or "文章质量检查未通过",
-                        "retryable": False,
-                    })
-                    return _persist(state, store)
+                state["research_bundle"] = sanitize_json(bundle or {})
+                state["quality_gate"] = sanitize_json(gate)
+                failed_reasons = "；".join(gate.get("hard_errors", []) or gate.get("reasons", []))
+                code = "ARTICLE_TEXT_RETRY_REQUIRED" if bool(used_fallback or article.get("used_local_fallback")) else "QUALITY_GATE_FAILED"
+                state.update({
+                    "status": "failed",
+                    "stage": "quality_gate",
+                    "progress": 45,
+                    "failed_step": "quality_gate",
+                    "error_code": code,
+                    "safe_error_message": failed_reasons or "文章质量检查未通过",
+                    "retryable": code == "ARTICLE_TEXT_RETRY_REQUIRED",
+                    "image_usage": {"generation_calls": 0, "paid_calls": 0, "retry_calls": 0, "budget_exceeded": False},
+                })
+                return _persist(state, store)
             state["text_generation_calls"] = int(article.get("text_generation_calls") or generation_stats.get("text_generation_calls") or (0 if used_fallback else 1))
             state["text_generation_limit"] = int(article.get("text_generation_limit") or generation_stats.get("text_generation_limit") or 1)
             state["text_generation_second_call_reason"] = str(article.get("text_generation_second_call_reason") or generation_stats.get("text_generation_second_call_reason") or "")

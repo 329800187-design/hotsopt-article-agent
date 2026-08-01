@@ -162,6 +162,12 @@ def test_ZERO_ACCEPTED_SOURCE_TIMEOUT_USES_LOCAL_COMPLETE_DRAFT(tmp_path: Path, 
         lambda self, topic, references=None, supplemental_text="": _zero_bundle(topic),
         lambda *args, **kwargs: (_ for _ in ()).throw(ProviderError("TIMEOUT", "timeout")),
     )
+    assert result["status"] == "failed"
+    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+    assert result["article"] is None
+    assert result["image_usage"]["generation_calls"] == 0
+    assert "公开资料已保存" in result["fallback_notice"]
+    return
     article = result["article"]
     bodies = [section["body"] for section in article["sections"]]
     assert result["status"] == "completed"
