@@ -72,11 +72,125 @@ SOURCE_CONTAMINATION_RE = re.compile(
     r"打开[\u4e00-\u9fffA-Za-z0-9]{0,12}新闻|阅读体验更佳|更多内容请打开|下载\s*APP|APP内打开"
 )
 FIXED_FILLER_HEADINGS = {"事件概览", "已确认信息", "背景信息", "可能影响", "后续关注"}
+DANGLING_SECOND_MARKER_RE = re.compile(r"(?:^|[。！？；;:：\n]\s*)(?:二是|其二|第二，|第二、|第二点)")
+FIRST_MARKER_RE = re.compile(r"(?:^|[。！？；;:：\n]\s*)(?:一是|其一|第一，|第一、|第一点)")
+PHONE_DROP_SOURCE_RE = re.compile(r"(?:手机|iPhone|设备).{0,30}(?:坠落|掉落)|(?:坠落|掉落).{0,30}(?:手机|iPhone|设备)")
+AIRCRAFT_ACCIDENT_WORDING_RE = re.compile(r"(?:坠机|空难|飞机失事|坠毁)")
+LOW_KM_SOURCE_RE = re.compile(r"(?:1(?:\.\d+)?|2(?:\.\d+)?)\s*(?:千米|公里|km|KM)")
+TEN_THOUSAND_METER_RE = re.compile(r"(?:万米|一万米|10000\s*米|10,000\s*米)")
+UNSUPPORTED_TECH_DETAIL_RE = re.compile(r"(?:卫星信号|航空级铝合金|超瓷晶|陶瓷护盾|钛金属边框|主板焊点|电池鼓包|防抖组件)")
+FOLLOWUP_NONFACT_RE = re.compile(r"(?:建议|后续|是否|可能|等待|关注).{0,40}(?:发布|说明|回应|结论|来源|信息|下结论)")
 
 
 def contamination_hits(text: str) -> list[str]:
     hits = [match.group(0) for match in SOURCE_CONTAMINATION_RE.finditer(str(text or ""))]
     return list(dict.fromkeys(hits))[:20]
+
+
+def dangling_list_marker_hits(text: str) -> list[str]:
+    content = str(text or "")
+    if not DANGLING_SECOND_MARKER_RE.search(content) or FIRST_MARKER_RE.search(content):
+        return []
+    return [match.group(0).strip() for match in DANGLING_SECOND_MARKER_RE.finditer(content)][:5]
+
+
+def misleading_aircraft_accident_hits(article: dict[str, Any], research_bundle: dict[str, Any] | None) -> list[str]:
+    markdown = str(article.get("content_markdown") or "")
+    if not AIRCRAFT_ACCIDENT_WORDING_RE.search(markdown):
+        return []
+    bundle = research_bundle or {}
+    source_text = " ".join(
+        str(item.get("title") or "") + " " + str(item.get("content") or item.get("text") or "")
+        for item in bundle.get("sources") or []
+        if isinstance(item, dict)
+    )
+    topic_text = str(bundle.get("topic_title") or bundle.get("title") or "")
+    context = f"{topic_text} {source_text}"
+    if PHONE_DROP_SOURCE_RE.search(context) and not AIRCRAFT_ACCIDENT_WORDING_RE.search(source_text):
+        return list(dict.fromkeys(match.group(0) for match in AIRCRAFT_ACCIDENT_WORDING_RE.finditer(markdown)))[:5]
+    return []
+
+
+def exaggerated_altitude_hits(article: dict[str, Any], research_bundle: dict[str, Any] | None) -> list[str]:
+    markdown = str(article.get("content_markdown") or "")
+    if not TEN_THOUSAND_METER_RE.search(markdown):
+        return []
+    bundle = research_bundle or {}
+    source_text = " ".join(
+        str(item.get("title") or "") + " " + str(item.get("content") or item.get("text") or "")
+        for item in bundle.get("sources") or []
+        if isinstance(item, dict)
+    )
+    if LOW_KM_SOURCE_RE.search(source_text) and not TEN_THOUSAND_METER_RE.search(source_text):
+        return list(dict.fromkeys(match.group(0) for match in TEN_THOUSAND_METER_RE.finditer(markdown)))[:5]
+    return []
+
+
+def unsupported_technical_detail_hits(article: dict[str, Any], research_bundle: dict[str, Any] | None) -> list[str]:
+    markdown = str(article.get("content_markdown") or "")
+    bundle = research_bundle or {}
+    source_text = " ".join(
+        str(item.get("title") or "") + " " + str(item.get("content") or item.get("text") or "")
+        for item in bundle.get("sources") or []
+        if isinstance(item, dict)
+    )
+    hits = []
+    for match in UNSUPPORTED_TECH_DETAIL_RE.finditer(markdown):
+        value = match.group(0)
+        if value and value not in source_text:
+            hits.append(value)
+    return list(dict.fromkeys(hits))[:5]
+
+
+def _article_title(article: dict[str, Any]) -> str:
+    title = str(article.get("title") or "").strip()
+    if title:
+        return re.sub(r"^#{1,6}\s*", "", title).strip()
+    match = re.search(r"^#\s*(.+)$", str(article.get("content_markdown") or ""), flags=re.M)
+    return match.group(1).strip() if match else ""
+
+
+def unbalanced_title_quote_hits(article: dict[str, Any]) -> list[str]:
+    title = _article_title(article)
+    if not title:
+        return []
+    pairs = (("“", "”"), ("‘", "’"), ("「", "」"), ("『", "』"), ("《", "》"))
+    for left, right in pairs:
+        if title.count(left) != title.count(right):
+            return [title]
+    if title.count('"') % 2 or title.count("'") % 2:
+        return [title]
+    return []
+
+
+def copied_source_title_hits(article: dict[str, Any], research_bundle: dict[str, Any] | None) -> list[str]:
+    title = _article_title(article)
+    title_norm = _normalize(title)
+    if len(title_norm) < 14:
+        return []
+    bundle = research_bundle or {}
+    candidates = [
+        str(bundle.get("topic_title") or bundle.get("title") or "").strip(),
+    ]
+    for source in bundle.get("sources") or []:
+        if isinstance(source, dict):
+            candidates.append(str(source.get("title") or "").strip())
+    hits: list[str] = []
+    for candidate in candidates:
+        candidate_norm = _normalize(candidate)
+        if len(candidate_norm) < 14:
+            continue
+        min_len = min(len(title_norm), len(candidate_norm))
+        max_len = max(len(title_norm), len(candidate_norm))
+        if title_norm == candidate_norm:
+            hits.append(candidate)
+            continue
+        if min_len / max(1, max_len) >= 0.75 and (title_norm in candidate_norm or candidate_norm in title_norm):
+            hits.append(candidate)
+            continue
+        if SequenceMatcher(None, title_norm, candidate_norm).ratio() >= 0.92:
+            hits.append(candidate)
+    return list(dict.fromkeys(item for item in hits if item))[:5]
 
 
 def _body_paragraphs(markdown: str) -> list[str]:
@@ -125,7 +239,7 @@ def _ngram_similarity(left: str, right: str, n: int) -> float:
     return len(grams_a & grams_b) / max(1, min(len(grams_a), len(grams_b)))
 
 
-def intra_article_quality(article: dict[str, Any]) -> dict[str, Any]:
+def intra_article_quality(article: dict[str, Any], research_bundle: dict[str, Any] | None = None) -> dict[str, Any]:
     markdown = str(article.get("content_markdown") or "")
     paragraphs = _body_paragraphs(markdown)
     sentences = _sentence_list(markdown)
@@ -157,6 +271,12 @@ def intra_article_quality(article: dict[str, Any]) -> dict[str, Any]:
         for item in sentences
         if re.search(r"(进入了\s*[，,]\s*就|可能进入了\s*[，,]|[，,]\s*就没办法|[的了在将把被与]\s*[。！？]$)", item)
     ][:5]
+    dangling_markers = dangling_list_marker_hits(markdown)
+    aircraft_wording = misleading_aircraft_accident_hits(article, research_bundle)
+    exaggerated_altitude = exaggerated_altitude_hits(article, research_bundle)
+    unsupported_tech = unsupported_technical_detail_hits(article, research_bundle)
+    unbalanced_quotes = unbalanced_title_quote_hits(article)
+    copied_titles = copied_source_title_hits(article, research_bundle)
     repeated_fragments = _repeated_chinese_fragments(markdown)
     fixed_heading_count = sum(1 for heading in heading_hits if heading.strip() in FIXED_FILLER_HEADINGS)
     failures: list[str] = []
@@ -172,6 +292,18 @@ def intra_article_quality(article: dict[str, Any]) -> dict[str, Any]:
         failures.append("SOURCE_CONTENT_CONTAMINATED")
     if incomplete:
         failures.append("INCOMPLETE_SENTENCE")
+    if dangling_markers:
+        failures.append("DANGLING_LIST_MARKER")
+    if aircraft_wording:
+        failures.append("MISLEADING_AIRCRAFT_ACCIDENT_WORDING")
+    if exaggerated_altitude:
+        failures.append("EXAGGERATED_ALTITUDE_WORDING")
+    if unsupported_tech:
+        failures.append("UNSUPPORTED_TECHNICAL_DETAIL")
+    if unbalanced_quotes:
+        failures.append("UNBALANCED_TITLE_QUOTE")
+    if copied_titles:
+        failures.append("COPIED_SOURCE_TITLE")
     if fixed_heading_count >= 4:
         failures.append("FIXED_FILLER_STRUCTURE")
     return {
@@ -184,6 +316,12 @@ def intra_article_quality(article: dict[str, Any]) -> dict[str, Any]:
         "max_paragraph_similarity": round(max_similarity, 4),
         "contamination_hits": contamination_hits(markdown),
         "incomplete_sentences": incomplete,
+        "dangling_list_marker_hits": dangling_markers,
+        "misleading_aircraft_accident_hits": aircraft_wording,
+        "exaggerated_altitude_hits": exaggerated_altitude,
+        "unsupported_technical_detail_hits": unsupported_tech,
+        "unbalanced_title_quote_hits": unbalanced_quotes,
+        "copied_source_title_hits": copied_titles,
         "fixed_filler_heading_count": fixed_heading_count,
     }
 
@@ -354,6 +492,8 @@ def _unsupported_concrete_claims(markdown: str, fact_map: dict[str, dict[str, An
     for clause in _fact_clauses(body):
         if not CONCRETE_CLAIM_RE.search(clause) or EXPLICIT_NONFACT_RE.search(clause):
             continue
+        if FOLLOWUP_NONFACT_RE.search(clause):
+            continue
         if SOURCE_REF_LINE_RE.match(clause) or URL_RE.search(clause) or PUBLISHED_AT_ONLY_RE.match(clause):
             continue
         if not any(claim_supported_by_fact(clause, fact) for fact in canonical_facts if fact.strip()):
@@ -498,7 +638,7 @@ def analyze_article(article: dict[str, Any], research_bundle: dict[str, Any] | N
         1,
     ))
     unique_basis_count = int(trace.get("total_count") or 0)
-    intra = intra_article_quality(article)
+    intra = intra_article_quality(article, bundle)
     return {"word_count": actual_word_count, "target_word_count": target_word_count, "length_ratio": round(length_ratio, 4), "verified_fact_count": int(trace.get("validated_count") or 0), "fact_basis_count": unique_basis_count, "invalid_fact_count": max(0, unique_basis_count - int(trace.get("validated_count") or 0)), "cross_verified_fact_count": int(trace.get("cross_verified_count") or 0), "source_count": source_count, "publisher_count": source_count, "time_count": time_count, "entity_count": entity_count, "number_count": number_count, "repetition_score": round(repetition_ratio, 4), "vague_sentence_ratio": round(vague_ratio, 4), "source_coverage": round(source_coverage, 4), "sentence_count": len(sentences), "information_sufficiency_score": float(score), "fact_trace": trace, "intra_article_quality": intra}
 
 
@@ -617,7 +757,7 @@ def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None
     limited_research_mode = bool(bundle.get("hotlist_metadata_available") and str(bundle.get("research_status") or "") == "hotlist_limited")
     custom_topic_mode = bool(bundle.get("custom_topic") and str(bundle.get("research_status") or "") == "custom_topic")
     trace = metrics.get("fact_trace") or {}
-    intra = metrics.get("intra_article_quality") or intra_article_quality(article)
+    intra = metrics.get("intra_article_quality") or intra_article_quality(article, bundle)
 
     if not markdown.strip():
         hard_reasons.append("正文内容为空")

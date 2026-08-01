@@ -60,8 +60,6 @@ USER_FACING_ERROR_MESSAGES = {
     "ARTICLE_PARSE_ERROR": "文章解析失败，模型已返回正文但结构整理出错，请重试。\n错误码：ARTICLE_PARSE_ERROR",
     "MODEL_OUTPUT_REASONING_ONLY": "当前模型只返回了推理内容，没有返回可用正文。\n请改用普通对话/写作模型，或检查中转服务的模型配置。\n错误码：MODEL_OUTPUT_REASONING_ONLY",
 }
-
-
 def user_facing_error_message(code: str, fallback: str = "") -> str:
     return USER_FACING_ERROR_MESSAGES.get(str(code), fallback or "网络连接异常")
 

@@ -535,20 +535,24 @@ class OpenAITextProvider:
             )
         except ProviderError as exc:
             if exc.code == "MODEL_OUTPUT_REASONING_ONLY":
-                # Reasoning-only model: connection succeeded, but content is unusable
+                # Upstream is reachable, but this model cannot produce usable
+                # article body content and must not verify the saved profile.
                 diag = dict(exc.details or self.last_diagnostic)
                 diag["provider_reachable"] = True
                 diag["reasoning_content_present"] = True
                 diag["content_present"] = False
                 diag["notice"] = "连接成功，但当前模型只返回推理内容，无法用于生成文章正文。请改用普通对话/写作模型。"
                 return ModelTestResult(
-                    True,
+                    False,
                     "openai-compatible-text",
                     str(self.profile.get("model") or ""),
                     self.last_http_status,
                     int((time.perf_counter() - started) * 1000),
                     "text",
                     False,
+                    error_code="MODEL_OUTPUT_REASONING_ONLY",
+                    error_message=redact_sensitive_text(str(exc.detail)),
+                    retryable=False,
                     details=diag,
                 )
             return self._error_result(started, exc)

@@ -198,3 +198,81 @@ def test_16_five_articles_pass_intra_quality_and_cross_article_difference():
     assert all(report["passed"] for report in reports)
     bodies = [article["content_markdown"] for article in articles]
     assert len(set(bodies)) == 5
+
+
+def test_17_phone_drop_must_not_be_rewritten_as_aircraft_crash():
+    article = {
+        "title": "高空坠机后手机完好",
+        "intro": "一部手机从飞机上掉落后被找回，报道只涉及设备坠落。",
+        "sections": [
+            {"heading": "高空坠机后的手机状态", "body": "报道说手机从飞机上坠落后在农田中找回，并没有发生飞机失事。"},
+            {"heading": "信息边界", "body": "公开资料只说明手机掉落、定位和找回过程，不能扩大成航空事故。"},
+            {"heading": "读者判断", "body": "这只是设备意外坠落个案，不应被写成飞机事故或空难。"},
+        ],
+        "content_markdown": "# 高空坠机后手机完好\n\n一部手机从飞机上掉落后被找回，报道只涉及设备坠落。\n\n## 高空坠机后的手机状态\n报道说手机从飞机上坠落后在农田中找回，并没有发生飞机失事。\n\n## 信息边界\n公开资料只说明手机掉落、定位和找回过程，不能扩大成航空事故。\n\n## 读者判断\n这只是设备意外坠落个案，不应被写成飞机事故或空难。",
+    }
+    bundle = {
+        "accepted_source_count": 1,
+        "sources": [
+            {
+                "title": "一台苹果 iPhone 从 1.1 千米高空坠落后被找回",
+                "content": "居民乘坐飞机时，其使用的一部没有保护壳的 iPhone 从 1.1 千米高的飞机上意外坠落，随后在油菜田中找回。",
+                "accepted_for_research": True,
+            }
+        ],
+    }
+    report = intra_article_quality(article, bundle)
+    assert "MISLEADING_AIRCRAFT_ACCIDENT_WORDING" in report["failures"]
+    gate = quality_gate(article, bundle)
+    assert "ARTICLE_QUALITY_BLOCKED:MISLEADING_AIRCRAFT_ACCIDENT_WORDING" in gate["hard_errors"]
+
+
+def test_18_dangling_second_marker_is_blocked():
+    article = _article(extra="二是在讨论类似新闻时，读者还需要区分个案事实和普遍规律。")
+    report = intra_article_quality(article)
+    assert "DANGLING_LIST_MARKER" in report["failures"]
+
+
+def test_19_low_kilometer_source_must_not_be_rewritten_as_ten_thousand_meters():
+    article = {
+        "title": "万米高空坠落近乎无损",
+        "intro": "一部 iPhone 从万米高空坠落后被找回。",
+        "sections": [
+            {"heading": "万米高空的意外", "body": "这段正文把 1.1 千米夸大成万米高空。"},
+            {"heading": "信息边界", "body": "来源只说手机从 1.1 千米高度坠落，不能改写成一万米。"},
+            {"heading": "读者判断", "body": "数字量级变化会改变读者对事件性质的理解。"},
+        ],
+        "content_markdown": "# 万米高空坠落近乎无损\n\n一部 iPhone 从万米高空坠落后被找回。\n\n## 万米高空的意外\n这段正文把 1.1 千米夸大成万米高空。\n\n## 信息边界\n来源只说手机从 1.1 千米高度坠落，不能改写成一万米。\n\n## 读者判断\n数字量级变化会改变读者对事件性质的理解。",
+    }
+    bundle = {
+        "accepted_source_count": 1,
+        "sources": [
+            {
+                "title": "iPhone 从 1.1 千米高空坠落后被找回",
+                "content": "报道称一部 iPhone 从 1.1 千米高的飞机上意外坠落，随后被找回。",
+                "accepted_for_research": True,
+            }
+        ],
+    }
+    report = intra_article_quality(article, bundle)
+    assert "EXAGGERATED_ALTITUDE_WORDING" in report["failures"]
+
+
+def test_20_unsourced_technical_details_are_blocked():
+    article = {
+        "title": "手机定位找回",
+        "intro": "机主通过 Find My 定位找回手机。",
+        "sections": [
+            {"heading": "定位过程", "body": "文章自行补写该应用利用卫星信号定位。"},
+            {"heading": "材料推断", "body": "文章又补写航空级铝合金和超瓷晶材料提升抗摔性能。"},
+            {"heading": "信息边界", "body": "来源没有提供这些技术细节。"},
+        ],
+        "content_markdown": "# 手机定位找回\n\n机主通过 Find My 定位找回手机。\n\n## 定位过程\n文章自行补写该应用利用卫星信号定位。\n\n## 材料推断\n文章又补写航空级铝合金和超瓷晶材料提升抗摔性能。\n\n## 信息边界\n来源没有提供这些技术细节。",
+    }
+    bundle = {
+        "accepted_source_count": 1,
+        "sources": [{"title": "手机坠落后被找回", "content": "机主通过 Find My 应用定位并找回手机。", "accepted_for_research": True}],
+    }
+    report = intra_article_quality(article, bundle)
+    assert "UNSUPPORTED_TECHNICAL_DETAIL" in report["failures"]
+    assert set(report["unsupported_technical_detail_hits"]) >= {"卫星信号", "航空级铝合金", "超瓷晶"}

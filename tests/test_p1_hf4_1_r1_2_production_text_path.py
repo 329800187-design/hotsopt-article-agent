@@ -336,6 +336,21 @@ class TestGenerate:
                 assert spy.called
                 assert result.success
 
+    def test_basic_connection_test_fails_reasoning_only_content(self):
+        provider = OpenAITextProvider(_make_profile())
+        resp = _mock_response(json.dumps({
+            "choices": [{"message": {"content": "", "reasoning_content": "thinking only"}}]
+        }))
+        with patch("providers.text_provider.create_http_client") as mock_client:
+            mock_ctx = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_ctx
+            mock_ctx.post.return_value = resp
+            result = provider.basic_connection_test()
+            assert result.success is False
+            assert result.error_code == "MODEL_OUTPUT_REASONING_ONLY"
+            assert result.details["provider_reachable"] is True
+            assert result.details["content_present"] is False
+
     def test_article_capability_test_calls_request_text(self):
         provider = OpenAITextProvider(_make_profile())
         cap_body = json.dumps({
