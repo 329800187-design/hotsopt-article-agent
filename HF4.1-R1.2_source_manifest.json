@@ -1,6 +1,6 @@
 {
-  "zip": "E:\\hotspot-article-agent\\热点图文批量生产工作台_RC1.3.3-Lite-P1-HF4.1-R1.2_Source.zip",
-  "file_count": 247,
+  "zip": "E:\\hotspot-article-agent\\热点图文批量生产工作台_RC1.3.3-Lite-R2.2.8_Source.zip",
+  "file_count": 276,
   "files": [
     ".gitignore",
     "LICENSE",
@@ -53,6 +53,7 @@
     "generation/similarity.py",
     "generation/single_task.py",
     "generation/source_overlap.py",
+    "generation/topic_classifier.py",
     "generation/versioning.py",
     "hot_sources/__init__.py",
     "hot_sources/base.py",
@@ -78,8 +79,10 @@
     "license_admin/license_schema.py",
     "license_admin/signing_identity.py",
     "modules/__init__.py",
+    "modules/app_metadata.py",
     "modules/app_paths.py",
     "modules/app_version.py",
+    "modules/build_metadata.json",
     "modules/config_store.py",
     "modules/credential_store.py",
     "modules/database.py",
@@ -107,6 +110,7 @@
     "providers/errors.py",
     "providers/image_provider.py",
     "providers/model_discovery.py",
+    "providers/registry.py",
     "providers/text_provider.py",
     "pytest.ini",
     "requirements-admin.txt",
@@ -118,11 +122,14 @@
     "research/extractor.py",
     "research/service.py",
     "resources/license_public_key.pem",
+    "scripts/audit_missing_topic_ids.py",
     "scripts/build_rc1_3_1.py",
     "scripts/build_rc1_3_2.py",
     "scripts/build_rc1_3_3_lite.py",
     "scripts/build_rc1_3_3_lite_r2_2_7.py",
     "scripts/build_rc1_3_audit.py",
+    "scripts/final_double_smoke.py",
+    "scripts/final_hotspot_refresh.py",
     "scripts/finalize_phase2b1_evidence.py",
     "scripts/finalize_phase2b2_evidence.py",
     "scripts/finalize_phase2b3_1_evidence.py",
@@ -136,9 +143,12 @@
     "scripts/l1_offline_license_smoke.py",
     "scripts/launcher_shell.cs",
     "scripts/license_admin_shell.cs",
+    "scripts/p1_fresh_hotspot_repro.py",
+    "scripts/package_current_handoff.py",
     "scripts/package_delivery_bundle.py",
     "scripts/package_l1.py",
     "scripts/package_p1_hf2_1_closure.py",
+    "scripts/package_p1_review_evidence.py",
     "scripts/package_phase1.py",
     "scripts/package_phase2a.py",
     "scripts/package_rc1.py",
@@ -170,13 +180,19 @@
     "scripts/security_scan.py",
     "scripts/stop_project.ps1",
     "scripts/test_license_fixture.py",
+    "start-dev.ps1",
     "start-license-generator.bat",
     "start.bat",
     "start.vbs",
     "stop.bat",
     "tests/conftest.py",
     "tests/fixtures/r2251_real_evidence_min.json",
+    "tests/test_content_initial_loading.py",
     "tests/test_core.py",
+    "tests/test_final_double_blocker_generation_calls.py",
+    "tests/test_image_provider_async.py",
+    "tests/test_image_provider_response_adapters.py",
+    "tests/test_issue_1_activation_repair.py",
     "tests/test_l1_1_final_closure.py",
     "tests/test_l1_2_1_final_closure.py",
     "tests/test_l1_2_2_final_closure.py",
@@ -184,6 +200,7 @@
     "tests/test_l1_2_final_closure.py",
     "tests/test_license_activation_code_import.py",
     "tests/test_offline_license_l1.py",
+    "tests/test_p1_article_quality_research_fix.py",
     "tests/test_p1_hf1_targeted.py",
     "tests/test_p1_hf2_1_targeted.py",
     "tests/test_p1_hf2_2_targeted.py",
@@ -194,7 +211,15 @@
     "tests/test_p1_hf4_1_evidence.py",
     "tests/test_p1_hf4_1_r1.py",
     "tests/test_p1_hf4_1_r1_1_runtime.py",
+    "tests/test_p1_hf4_1_r1_2_1_final_fix.py",
+    "tests/test_p1_hf4_1_r1_2_article_quality_delivery.py",
+    "tests/test_p1_hf4_1_r1_2_config_persistence.py",
+    "tests/test_p1_hf4_1_r1_2_data_integrity_runtime.py",
+    "tests/test_p1_hf4_1_r1_2_export_gate_consistency.py",
     "tests/test_p1_hf4_1_r1_2_manual_export.py",
+    "tests/test_p1_hf4_1_r1_2_production_text_path.py",
+    "tests/test_p1_hf4_1_r1_2_research_fact_cards_nameerror.py",
+    "tests/test_p1_hf4_1_r1_2_text_timeout_fix.py",
     "tests/test_p1_hf4_content_layout_speed.py",
     "tests/test_phase1_closure.py",
     "tests/test_phase1_final_closure.py",
@@ -210,6 +235,7 @@
     "tests/test_phase2b2_multi_angle.py",
     "tests/test_phase2b3_1_1_semantics.py",
     "tests/test_phase2b3_1_inline_images.py",
+    "tests/test_provider_registry_delivery.py",
     "tests/test_r2_2_8_p1_gui_and_single.py",
     "tests/test_rc1_1_closure.py",
     "tests/test_rc1_2_closure.py",
@@ -237,7 +263,10 @@
     "tests/test_rc1_3_closure.py",
     "tests/test_rc1_3_customer_shell.py",
     "tests/test_rc1_delivery.py",
+    "tests/test_rc_regex_integrity.py",
+    "tests/test_tophub_overview.py",
     "tests/test_user_facing_experience.py",
+    "tests/test_windows_delivery_security_rules.py",
     "ui/__init__.py",
     "ui/assets/brand.ico",
     "ui/assets/empty-state.svg",
@@ -250,12 +279,75 @@
     "ui/styles.css",
     "ui/theme.py"
   ],
-  "sha256": "711a783062a41f26da64a36507b12b9d80611456cbd344168489b3cd9ed49f78",
+  "sha256": "e09bb45c492dc472bcaceae51732073652f63dbf05236b431a3de4d797b85bd5",
   "dirty_entries": [],
   "sensitive_hits": [],
-  "test_fixture_hits": [],
+  "test_fixture_hits": [
+    {
+      "path": "tests/test_phase1_closure.py",
+      "categories": [
+        "proxy_credentials"
+      ]
+    },
+    {
+      "path": "tests/test_phase1_final_closure.py",
+      "categories": [
+        "bearer_token",
+        "auth_assignment",
+        "key_assignment",
+        "proxy_credentials"
+      ]
+    },
+    {
+      "path": "tests/test_phase2a.py",
+      "categories": [
+        "proxy_credentials"
+      ]
+    },
+    {
+      "path": "tests/test_phase2a5_final_closure.py",
+      "categories": [
+        "bearer_token",
+        "auth_assignment",
+        "key_assignment"
+      ]
+    },
+    {
+      "path": "tests/test_rc1_3_1_security_and_final_state.py",
+      "categories": [
+        "key_assignment"
+      ]
+    },
+    {
+      "path": "tests/test_rc1_3_2_hardening.py",
+      "categories": [
+        "key_assignment"
+      ]
+    },
+    {
+      "path": "tests/test_rc1_3_3_lite_r2_2_3.py",
+      "categories": [
+        "bearer_token"
+      ]
+    },
+    {
+      "path": "tests/test_rc_regex_integrity.py",
+      "categories": [
+        "proxy_credentials"
+      ]
+    },
+    {
+      "path": "tests/test_windows_delivery_security_rules.py",
+      "categories": [
+        "openai_key",
+        "bearer_token",
+        "auth_assignment",
+        "key_assignment"
+      ]
+    }
+  ],
   "runtime_artifact_hits": [],
-  "files_scanned": 247,
+  "files_scanned": 276,
   "binary_files_scanned": 2,
   "allowed_hits": [],
   "forbidden_hits": [],
