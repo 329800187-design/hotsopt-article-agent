@@ -497,10 +497,20 @@ class SQLiteStore:
         batch["tasks"] = [item["task"] for item in batch["items"]]
         return batch
 
-    def list_batches(self) -> list[dict[str, Any]]:
+    def list_batches(self, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        sql = "SELECT batch_id FROM generation_batches ORDER BY created_at DESC"
+        params: list[Any] = []
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([max(1, min(int(limit), 100)), max(0, int(offset))])
         with self.connect() as connection:
-            ids = [str(row[0]) for row in connection.execute("SELECT batch_id FROM generation_batches ORDER BY created_at DESC").fetchall()]
-        return [self.get_batch(batch_id) for batch_id in ids if self.get_batch(batch_id)]
+            ids = [str(row[0]) for row in connection.execute(sql, params).fetchall()]
+        values: list[dict[str, Any]] = []
+        for batch_id in ids:
+            batch = self.get_batch(batch_id)
+            if batch:
+                values.append(batch)
+        return values
 
     def list_batch_items(self, batch_id: str) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -511,19 +521,19 @@ class SQLiteStore:
         values = []
         for row in rows:
             item = dict(row)
-            item["topic_snapshot"] = json.loads(item["topic_snapshot"] or "{}")
+            item["topic_snapshot"] = self._json_loads(item.get("topic_snapshot"), {})
             task = {
                 "task_id": item.pop("task_id"), "task_name": item.pop("task_name"), "mode": item.pop("mode"),
-                "selected_topics": json.loads(item.pop("selected_topics") or "[]"), "article_count": item.pop("article_count"),
+                "selected_topics": self._json_loads(item.pop("selected_topics", "[]"), []), "article_count": item.pop("article_count"),
                 "status": item.pop("task_status"), "source_name": item.pop("source_name"),
-                "generation_options": json.loads(item.pop("task_generation_options") or "{}"),
+                "generation_options": self._json_loads(item.pop("task_generation_options", "{}"), {}),
                 "angle_id": item.pop("task_angle_id"), "angle_name": item.pop("task_angle_name"),
-                "angle_plan": json.loads(item.pop("task_angle_plan") or "{}"), "angle_position": item.pop("task_angle_position"),
+                "angle_plan": self._json_loads(item.pop("task_angle_plan", "{}"), {}), "angle_position": item.pop("task_angle_position"),
                 "similarity_status": item.pop("task_similarity_status"), "similarity_score": item.pop("task_similarity_score"),
                 "rewrite_count": item.pop("task_rewrite_count"),
                 "created_at": item.pop("task_created_at"), "updated_at": item.pop("task_updated_at"),
             }
-            values.append({"batch_item_id": item["batch_item_id"], "batch_id": item["batch_id"], "topic_id": item["topic_id"], "topic_snapshot": sanitize_sensitive_data(item["topic_snapshot"]), "position": item["position"], "status": item["status"], "angle_id": item["angle_id"], "angle_name": item["angle_name"], "angle_plan": json.loads(item["angle_plan"] or "{}"), "angle_position": item["angle_position"], "similarity_status": item["similarity_status"], "similarity_score": item["similarity_score"], "rewrite_count": item["rewrite_count"], "created_at": item["created_at"], "updated_at": item["updated_at"], "task": sanitize_sensitive_data(task)})
+            values.append({"batch_item_id": item["batch_item_id"], "batch_id": item["batch_id"], "topic_id": item["topic_id"], "topic_snapshot": sanitize_sensitive_data(item["topic_snapshot"]), "position": item["position"], "status": item["status"], "angle_id": item["angle_id"], "angle_name": item["angle_name"], "angle_plan": self._json_loads(item.get("angle_plan"), {}), "angle_position": item["angle_position"], "similarity_status": item["similarity_status"], "similarity_score": item["similarity_score"], "rewrite_count": item["rewrite_count"], "created_at": item["created_at"], "updated_at": item["updated_at"], "task": sanitize_sensitive_data(task)})
         return values
 
     def update_task_quality(self, task_id: str, similarity_status: str, similarity_score: float | None, rewrite_count: int | None = None) -> None:
@@ -570,11 +580,26 @@ class SQLiteStore:
         self._write(lambda connection: connection.execute("INSERT INTO topic_basket(basket_id,topics,updated_at) VALUES(1,?,?) ON CONFLICT(basket_id) DO UPDATE SET topics=excluded.topics,updated_at=excluded.updated_at", (json.dumps(topics, ensure_ascii=False), now)))
         return topics
 
-    def list_tasks(self) -> list[dict[str, Any]]:
-        with self.connect() as connection:
-            rows = connection.execute("SELECT * FROM generation_tasks ORDER BY created_at DESC").fetchall()
-        return [self._task_from_row(row) for row in rows]
+    @staticmethod
+    def _json_loads(value: Any, default: Any) -> Any:
+        try:
+            return json.loads(value or "")
+        except (TypeError, json.JSONDecodeError):
+            return default
 
+    def list_tasks(self, limit: int | None = None, offset: int = 0, unbatched: bool = False) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if unbatched:
+            clauses.append("task_id NOT IN (SELECT task_id FROM generation_batch_items)")
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"SELECT * FROM generation_tasks {where} ORDER BY created_at DESC"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([max(1, min(int(limit), 100)), max(0, int(offset))])
+        with self.connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [self._task_from_row(row) for row in rows]
     def delete_task(self, task_id: str) -> bool:
         def write(connection: sqlite3.Connection) -> bool:
             cursor = connection.execute("DELETE FROM generation_tasks WHERE task_id=?", (task_id,))
@@ -616,9 +641,9 @@ class SQLiteStore:
     @staticmethod
     def _task_from_row(row: sqlite3.Row) -> dict[str, Any]:
         task = dict(row)
-        task["selected_topics"] = json.loads(task.pop("selected_topics") or "[]")
-        task["generation_options"] = json.loads(task.get("generation_options") or "{}")
-        task["angle_plan"] = json.loads(task.get("angle_plan") or "{}")
+        task["selected_topics"] = SQLiteStore._json_loads(task.pop("selected_topics", "[]"), [])
+        task["generation_options"] = SQLiteStore._json_loads(task.get("generation_options"), {})
+        task["angle_plan"] = SQLiteStore._json_loads(task.get("angle_plan"), {})
         task = sanitize_sensitive_data(task)
         return task
 

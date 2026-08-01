@@ -635,10 +635,9 @@ def create_task(payload: CreateTaskRequest) -> JSONResponse:
 
 
 @app.get("/api/tasks")
-def list_tasks() -> JSONResponse:
-    items = store.list_tasks()
-    return _response(True, {"items": items, "count": len(items)})
-
+def list_tasks(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), unbatched: bool = Query(False)) -> JSONResponse:
+    items = store.list_tasks(limit=limit, offset=offset, unbatched=unbatched)
+    return _response(True, {"items": items, "count": len(items), "limit": limit, "offset": offset, "unbatched": unbatched})
 
 def _load_phase2a_task(task_id: str) -> dict[str, Any]:
     task = store.get_task(task_id)
@@ -1316,26 +1315,25 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
 
 
 @app.get("/api/batches")
-def list_batches() -> JSONResponse:
+def list_batches(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), refresh: bool = Query(True)) -> JSONResponse:
     try:
         items = []
-        for batch in batch_executor.store.list_batches():
+        item_errors: list[dict[str, Any]] = []
+        for batch in batch_executor.store.list_batches(limit=limit, offset=offset):
             batch_id = str((batch or {}).get("batch_id") or "")
-            refreshed = batch_executor.store.refresh_batch(batch_id) if batch_id else None
-            if refreshed and str(refreshed.get("status") or "") in {"queued", "running"}:
-                try:
-                    refreshed = batch_executor.start_batch(batch_id) or refreshed
-                except Exception:
-                    _logger.exception("list_batches: start_batch failed batch_id=%s", batch_id)
-                    _write_batch_submit_failure(batch_id, "BATCH_AUTO_START_FAILED",
-                                                "批次自动恢复失败，请查看 api.log 或手动重试。")
-                    refreshed = batch_executor.store.refresh_batch(batch_id) or refreshed
+            if not batch_id:
+                continue
+            try:
+                refreshed = batch_executor.store.refresh_batch(batch_id) if refresh else batch
+            except Exception as exc:
+                _logger.exception("list_batches: refresh failed batch_id=%s", batch_id)
+                item_errors.append({"batch_id": batch_id, "error": redact_sensitive_text(str(exc))})
+                refreshed = batch
             if refreshed:
                 items.append(refreshed)
-        return _response(True, {"items": items, "count": len(items)})
+        return _response(True, {"items": items, "count": len(items), "limit": limit, "offset": offset, "item_errors": item_errors})
     except Exception as exc:
         return _batch_error_response(exc, 500)
-
 
 @app.get("/api/batches/{batch_id}")
 def get_batch(batch_id: str) -> JSONResponse:

@@ -1143,16 +1143,83 @@ def render_editor(task_id: str, state: dict[str, Any]) -> None:
         st.caption("历史版本暂时无法读取。")
 
 
+def _render_standalone_tasks(tasks: list[dict[str, Any]], restricted: bool) -> None:
+    st.caption("显示最近 20 条历史内容。")
+    for index, task in enumerate(tasks, start=1):
+        task_id = str(task.get("task_id") or "")
+        if not task_id:
+            continue
+        state = load_generation_task(task_id) or {}
+        topics = task.get("selected_topics") if isinstance(task.get("selected_topics"), list) else []
+        topic = topics[0] if topics and isinstance(topics[0], dict) else {}
+        topic_title = str(topic.get("title") or task.get("task_name") or "未命名内容")
+        status = str(task.get("status") or state.get("status") or "")
+        with st.expander(f"{index}. {topic_title} · {_status(status)}"):
+            if not state:
+                st.info("这条内容的详情文件暂时不可读取，但任务记录仍然保留。")
+            _render_text_generation_status({**state, "status": state.get("status") or status}, task_id, restricted)
+            if status == "failed":
+                _render_failed_task_panel("", task_id, state, restricted)
+            article = state.get("article") or {}
+            if article:
+                st.markdown(f"### {article.get('title') or '文章'}")
+                intro = article.get("lead") or article.get("intro") or article.get("summary")
+                if intro:
+                    st.markdown(str(intro))
+                body_markdown = str(article.get("body_markdown") or article.get("content_markdown") or "").strip()
+                if not body_markdown and article.get("sections"):
+                    parts: list[str] = []
+                    for section in article.get("sections") or []:
+                        if not isinstance(section, dict):
+                            continue
+                        heading = str(section.get("heading") or "").strip()
+                        body = str(section.get("body") or "").strip()
+                        if body:
+                            parts.append(f"## {heading}\n{body}".strip() if heading else body)
+                    body_markdown = "\n\n".join(parts).strip()
+                with st.expander("查看全文"):
+                    st.markdown(body_markdown or "暂无正文。")
+            show_progress(state or {"status": status, "stage": status, "progress": 0})
+            if not restricted and status in {"queued", "running"}:
+                if st.button("取消这篇", key=f"rc1_standalone_cancel_{task_id}"):
+                    try:
+                        _api("POST", f"/tasks/{task_id}/cancel")
+                        st.rerun()
+                    except Exception as exc:
+                        _log_error("TASK-STATE-001", exc, page="我的内容", action="cancel_standalone", task_id=task_id)
+                        st.error("取消这篇失败，请稍后重试。\n错误码：TASK-STATE-001")
+
 def _content(restricted: bool = False) -> None:
     page_header("03 / 结果", "我的内容", "文章、封面、正文图片和历史版本都保存在本机")
-    try:
-        batches = _api("GET", "/batches", timeout=10).get("items", [])
-    except Exception:
-        st.error("内容暂时无法读取，请稍后重试。")
-        return
+    with st.spinner("正在加载内容列表…"):
+        try:
+            batch_payload = _api("GET", "/batches?limit=20", timeout=10)
+        except Exception as exc:
+            _log_error("CONTENT-LIST-001", exc, page="我的内容", action="load_batches")
+            st.error(f"内容暂时无法读取：{_api_error_text(exc) or '服务响应异常'}")
+            if st.button("重新加载", key="rc1_content_retry"):
+                st.rerun()
+            return
+    batches = batch_payload.get("items", [])
+    item_errors = batch_payload.get("item_errors") or []
+    if item_errors:
+        st.warning("部分历史记录暂时无法刷新，已先显示可读取内容。")
     if not batches:
-        st.info("还没有内容，先去选择一个热点吧。")
+        try:
+            standalone_tasks = _api("GET", "/tasks?limit=20&unbatched=true", timeout=10).get("items", [])
+        except Exception as exc:
+            _log_error("CONTENT-LIST-002", exc, page="我的内容", action="load_standalone_tasks")
+            st.error(f"历史内容暂时无法读取：{_api_error_text(exc) or '服务响应异常'}")
+            if st.button("重新加载", key="rc1_content_retry_tasks"):
+                st.rerun()
+            return
+        if standalone_tasks:
+            _render_standalone_tasks(standalone_tasks, restricted)
+        else:
+            st.info("还没有内容，先去选择一个热点吧。")
         return
+    if int(batch_payload.get("count") or 0) >= 20:
+        st.caption("已显示最近 20 次创作。")
     selected_delete_ids: list[str] = []
     if not restricted:
         clear_failed_confirmed = st.checkbox("我确认清空全部失败任务（不删除已导出的 Word/ZIP）", key="rc1_clear_failed_confirm")
