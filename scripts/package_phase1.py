@@ -45,6 +45,7 @@ def should_copy(path: Path) -> bool:
 
 def scan_text(path: Path | str, text: str) -> list[str]:
     relative = Path(path).as_posix()
+    basename = Path(path).name
     categories: list[str] = []
     for name, pattern in SENSITIVE_PATTERNS.items():
         if name != "key_assignment":
@@ -55,7 +56,7 @@ def scan_text(path: Path | str, text: str) -> list[str]:
         for line in text.splitlines():
             if not pattern.search(line):
                 continue
-            if relative == "desktop_host.py" and any(
+            if (relative == "desktop_host.py" or basename == "desktop_host.py") and any(
                 safe.fullmatch(line) for safe in SAFE_RUNTIME_TOKEN_ASSIGNMENTS
             ):
                 continue

@@ -166,7 +166,11 @@ def scan_tree(root: Path, secrets: Iterable[str] = ()) -> dict:
                         archive_has_test_fixture = archive_has_test_fixture or info.filename.startswith("tests/")
                         if not _should_scan_archive_entry(info.filename, info.file_size):
                             continue
-                        entry_categories = _scan_bytes(archive.read(info), secret_values)
+                        entry_data = archive.read(info)
+                        entry_categories = _scan_bytes(entry_data, secret_values)
+                        entry_categories = _remove_exact_runtime_false_positive(
+                            info.filename, entry_data, entry_categories
+                        )
                         categories.update(entry_categories)
                         if info.filename.startswith("runtime/"):
                             archive_runtime_categories.update(entry_categories)

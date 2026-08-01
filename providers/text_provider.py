@@ -339,12 +339,9 @@ def _decode_provider_response(response: httpx.Response) -> tuple[str, dict[str, 
                     diagnostic["parser_mode"] = "json"
                     diagnostic["content_present"] = False
                     diagnostic["reasoning_content_present"] = True
-                    # R1.2.1: Use reasoning_content as content for reasoning models (DeepSeek v4)
-                    rc = str(msg.get("reasoning_content") or "").strip()
-                    if rc:
-                        diagnostic["fallback_reasoning_content"] = True
-                        return (rc, diagnostic)
-                    return ("", diagnostic)
+                    # Do NOT use reasoning_content as article body content.
+                    # Return a sentinel so callers can detect this condition.
+                    return ("REASONING_ONLY", diagnostic)
         # Empty JSON but valid
         diagnostic["parser_mode"] = "json"
         return ("", diagnostic)
@@ -451,6 +448,9 @@ class OpenAITextProvider:
             # ── unified decode ──
             content, decode_diag = _decode_provider_response(response)
             diagnostic.update(decode_diag)
+            if content == "REASONING_ONLY":
+                diagnostic["error_type"] = "reasoning_only"
+                raise ProviderError("MODEL_OUTPUT_REASONING_ONLY", "当前模型只返回了推理内容，没有返回可用正文。请改用普通对话/写作模型，或检查中转服务的模型配置。", details=dict(diagnostic))
             if not content:
                 raise ProviderError("INVALID_RESPONSE", "text model response content is empty", details=dict(diagnostic))
             if content == "MODEL_OUTPUT_EMPTY":
@@ -533,6 +533,25 @@ class OpenAITextProvider:
                 bool(str(content).strip()),
                 details=details,
             )
+        except ProviderError as exc:
+            if exc.code == "MODEL_OUTPUT_REASONING_ONLY":
+                # Reasoning-only model: connection succeeded, but content is unusable
+                diag = dict(exc.details or self.last_diagnostic)
+                diag["provider_reachable"] = True
+                diag["reasoning_content_present"] = True
+                diag["content_present"] = False
+                diag["notice"] = "连接成功，但当前模型只返回推理内容，无法用于生成文章正文。请改用普通对话/写作模型。"
+                return ModelTestResult(
+                    True,
+                    "openai-compatible-text",
+                    str(self.profile.get("model") or ""),
+                    self.last_http_status,
+                    int((time.perf_counter() - started) * 1000),
+                    "text",
+                    False,
+                    details=diag,
+                )
+            return self._error_result(started, exc)
         except Exception as exc:
             return self._error_result(started, map_provider_exception(exc))
 
@@ -588,6 +607,7 @@ class OpenAITextProvider:
                 "TIMEOUT": "TEXT-LONG-TEST-TIMEOUT",
                 "INVALID_RESPONSE": "TEXT-LONG-TEST-FORMAT",
                 "MODEL_OUTPUT_INVALID": "TEXT-LONG-TEST-FORMAT",
+                "MODEL_OUTPUT_REASONING_ONLY": "TEXT-LONG-TEST-FORMAT",
                 "MODEL_NOT_FOUND": "TEXT-LONG-TEST-MODEL",
                 "ENDPOINT_NOT_FOUND": "TEXT-LONG-TEST-ENDPOINT",
                 "INVALID_REQUEST": "TEXT-LONG-TEST-ENDPOINT",

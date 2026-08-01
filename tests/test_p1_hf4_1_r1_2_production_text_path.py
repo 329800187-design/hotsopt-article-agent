@@ -129,11 +129,71 @@ class TestDecodeProviderResponse:
         })
         resp = _mock_response(body)
         content, diag = _decode_provider_response(resp)
-        # R1.2.1: reasoning_content is now extracted as content
-        assert content == "Let me think about this..."
+        # reasoning_content is NEVER used as article body content
+        assert content == "REASONING_ONLY"
         assert diag.get("reasoning_content_present") is True
         assert diag.get("content_present") is False
-        assert diag.get("fallback_reasoning_content") is True
+        # fallback_reasoning_content was removed — the sentinel replaces it
+        assert diag.get("fallback_reasoning_content") is None
+
+    def test_reasoning_only_raises_in_request_text(self):
+        """_request_text with REASONING_ONLY sentinel → raises MODEL_OUTPUT_REASONING_ONLY."""
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": "Let me think...",
+                }
+            }]
+        })
+        resp = _mock_response(body)
+        provider = OpenAITextProvider(_make_profile())
+        with patch("providers.text_provider.create_http_client") as mock_client:
+            mock_ctx = MagicMock()
+            mock_client.return_value.__enter__.return_value = mock_ctx
+            mock_ctx.post.return_value = resp
+            with pytest.raises(ProviderError) as exc_info:
+                provider._request_text(
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.5,
+                    max_tokens=100,
+                    response_format="none",
+                )
+            assert exc_info.value.code == "MODEL_OUTPUT_REASONING_ONLY"
+            assert "推理内容" in str(exc_info.value.detail)
+
+    def test_reasoning_only_not_passed_as_content(self):
+        """reasoning_content must never appear in article.body_markdown or Word export."""
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "reasoning_content": "这是推理内容，不应该出现在文章正文",
+                }
+            }]
+        })
+        resp = _mock_response(body)
+        content, diag = _decode_provider_response(resp)
+        # Content must be the sentinel, NOT the reasoning text
+        assert content == "REASONING_ONLY"
+        assert "这是推理内容" not in content
+        assert "不应该出现在文章正文" not in content
+
+    def test_content_normal_ignores_reasoning(self):
+        """When content is present, reasoning_content is ignored."""
+        body = json.dumps({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "这是正文内容",
+                    "reasoning_content": "Let me think...",
+                }
+            }]
+        })
+        resp = _mock_response(body)
+        content, diag = _decode_provider_response(resp)
+        assert "这是正文内容" in content
+        assert content != "REASONING_ONLY"
 
 
 # ── test 2: _request_text shared path ──

@@ -1157,7 +1157,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                 state["provider_error_code"] = str(exc.code)
                 state["provider_error_message"] = redact_sensitive_text(str(getattr(exc, "detail", exc)))[:500]
                 state["text_http_status"] = int((getattr(exc, "details", {}) or {}).get("http_status") or 0)
-                if exc.code not in {"TIMEOUT", "TLS_ERROR", "ARTICLE_TOO_SHORT", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED", "ARTICLE_PARSE_ERROR", "MODEL_OUTPUT_EMPTY", "PROVIDER_INTERNAL_ERROR"}:
+                if exc.code not in {"TIMEOUT", "TLS_ERROR", "ARTICLE_TOO_SHORT", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED", "ARTICLE_PARSE_ERROR", "MODEL_OUTPUT_EMPTY", "MODEL_OUTPUT_REASONING_ONLY", "PROVIDER_INTERNAL_ERROR"}:
                     raise
                 used_fallback = True
                 state["text_generation_result"] = "fallback"

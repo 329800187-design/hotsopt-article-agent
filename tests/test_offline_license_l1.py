@@ -17,6 +17,51 @@ FEATURES = ["hot_topics", "custom_topic", "five_articles", "image_generation", "
 
 
 @pytest.fixture
+def license_env_outside(monkeypatch):
+    """Fixture that creates license root OUTSIDE the project tree.
+
+    Uses a temp directory in the system TEMP folder, which is guaranteed to be
+    outside PROJECT_ROOT (project is on E:, TEMP is on C:).
+    """
+    import tempfile
+    root = Path(tempfile.mkdtemp(prefix="pytest-license-")) / "license"
+    root.mkdir(parents=True)
+    private = Ed25519PrivateKey.generate()
+    public_path = root.parent / "license_public_key.pem"
+    public_path.write_bytes(private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+    monkeypatch.setattr(device_identity, "license_root", lambda: root)
+    monkeypatch.setattr(license_service, "license_root", lambda: root)
+    monkeypatch.setattr(license_service, "PUBLIC_KEY_PATH", public_path)
+    monkeypatch.setattr(license_service, "ACTIVE_LICENSE_PATH", root / "active.license")
+    monkeypatch.setattr(license_service, "STATE_PATH", root / "license_state.json")
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+
+    def issue(**changes):
+        value = {
+            "schema_version": 1,
+            "license_id": "LIC-TEST-000001",
+            "product": "hotspot-article-agent",
+            "edition": "standard",
+            "customer_name": "测试客户",
+            "device_code": device_identity.device_code(),
+            "issued_at": now.isoformat(),
+            "not_before": (now - timedelta(minutes=1)).isoformat(),
+            "expires_at": (now + timedelta(days=30)).isoformat(),
+            "features": FEATURES,
+            "signature_algorithm": "Ed25519",
+        }
+        value.update(changes)
+        value.pop("signature", None)
+        value["signature"] = base64.urlsafe_b64encode(private.sign(canonical_payload(value))).decode("ascii").rstrip("=")
+        return value
+
+    yield root, issue
+    # Cleanup
+    import shutil
+    shutil.rmtree(root.parent, ignore_errors=True)
+
+
+@pytest.fixture
 def license_env(tmp_path, monkeypatch):
     root = tmp_path / "license"
     private = Ed25519PrivateKey.generate()
@@ -257,9 +302,101 @@ def test_active_license_is_utf8_without_bom(license_env):
     assert not license_service.ACTIVE_LICENSE_PATH.read_bytes().startswith(b"\xef\xbb\xbf")
 
 
-def test_license_storage_is_outside_project_tree(license_env):
-    root, _ = license_env
-    assert "hotspot-article-agent" not in str(root)
+def _is_subpath_of(child: Path, parent: Path) -> bool:
+    """Return True if `child` is strictly inside `parent`, using resolved canonical paths.
+
+    Handles Windows case-insensitivity and drive letter normalization.
+    A path is NOT inside itself (child != parent required).
+    """
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return child.resolve() != parent.resolve()
+    except ValueError:
+        return False
+
+
+def _project_root_resolved() -> Path:
+    from modules.app_paths import PROJECT_ROOT
+    return PROJECT_ROOT.resolve()
+
+
+def test_license_storage_is_outside_project_tree(license_env_outside):
+    """许可证存储必须在项目目录之外，使用 pathlib 正式路径关系判断，不用字符串包含。"""
+    root, _ = license_env_outside
+    assert not _is_subpath_of(root.resolve(), _project_root_resolved()), (
+        f"license_root={root.resolve()} 不应在 PROJECT_ROOT={_project_root_resolved()} 内"
+    )
+
+
+# ── 以下为 Windows 路径边界测试（覆盖 brief 列出的所有场景）──
+
+def test_license_outside_even_when_repo_name_contains_hotspot_article_agent(tmp_path, monkeypatch):
+    """仓库目录名含 hotspot-article-agent → 不误判为项目内。"""
+    import modules.app_paths as _ap
+    simulated_root = tmp_path / "hotspot-article-agent"
+    simulated_root.mkdir(parents=True)
+    monkeypatch.setattr(_ap, "PROJECT_ROOT", simulated_root)
+    license_dir = tmp_path / "outside-license"
+    license_dir.mkdir(parents=True)
+    assert not _is_subpath_of(license_dir.resolve(), simulated_root.resolve())
+
+
+def test_license_outside_cross_drive_e_to_c():
+    """仓库位于 E盘，LOCALAPPDATA 位于 C盘 → 不同驱动器必然在项目外。"""
+    child = Path("C:/Users/test/AppData/Local/热点图文批量生产工作台/license").resolve()
+    parent = Path("E:/hotspot-article-agent").resolve()
+    assert not _is_subpath_of(child, parent)
+
+
+def test_license_inside_when_data_license_in_repo(tmp_path):
+    """仓库中的 data/license 必须判定为项目目录内。"""
+    project = tmp_path / "my-project"
+    data_license = project / "data" / "license"
+    data_license.mkdir(parents=True)
+    assert _is_subpath_of(data_license.resolve(), project.resolve())
+
+
+def test_license_case_insensitive_path(tmp_path):
+    """路径大小写不同不应影响判定。"""
+    project = tmp_path / "MY-PROJECT"
+    project.mkdir()
+    child = project / "data" / "LICENSE"
+    child.mkdir(parents=True)
+    assert _is_subpath_of(child.resolve(), project.resolve())
+
+
+def test_license_chinese_path(tmp_path):
+    """路径含中文应正确处理。"""
+    project = tmp_path / "我的项目"
+    project.mkdir()
+    child = project / "数据" / "许可证"
+    child.mkdir(parents=True)
+    assert _is_subpath_of(child.resolve(), project.resolve())
+
+
+def test_license_real_deep_subpath(tmp_path):
+    """真实深层子路径应正确判定。"""
+    project = tmp_path / "real-project"
+    project.mkdir()
+    child = project / "some" / "deep" / "nested" / "license"
+    child.mkdir(parents=True)
+    assert _is_subpath_of(child.resolve(), project.resolve())
+
+
+def test_license_prefix_similar_but_not_subpath(tmp_path):
+    """前缀相似但不是子路径（如 hotspot vs hotspot-article-agent）不应误判。"""
+    project = tmp_path / "hotspot"
+    project.mkdir()
+    similar = tmp_path / "hotspot-article-agent" / "license"
+    similar.mkdir(parents=True)
+    assert not _is_subpath_of(similar.resolve(), project.resolve())
+
+
+def test_license_root_equals_project_root_not_inside(tmp_path):
+    """license_root 等于 PROJECT_ROOT 时（自身）判定为不在内部（不允许同目录）。"""
+    same = tmp_path / "same"
+    same.mkdir()
+    assert not _is_subpath_of(same.resolve(), same.resolve())
 
 
 def test_public_key_resource_exists_without_private_material():
