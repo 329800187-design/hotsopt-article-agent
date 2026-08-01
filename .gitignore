@@ -1,4 +1,5 @@
 config/settings.json
+config/credentials.dat
 .env
 .env.*
 *.pem
