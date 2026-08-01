@@ -19,24 +19,17 @@ from providers.text_provider import ProviderError
 
 
 def _article(version: str) -> dict:
-    intro = f"这是 {version} 版本的测试导语，用来确认全文重写时文章、封面和正文图片都能保持一致。"
-    body = (
-        f"这是 {version} 版本的正文内容，围绕已经确认的信息进行梳理，并说明读者可以怎样核验来源。"
-        "文章同时提示传播风险、背景原因和后续关注点，保证测试样本具备真实文章结构。"
-    )
+    def filler(seed: int, length: int = 260) -> str:
+        return "".join(chr(0x4E00 + ((seed * 3001 + index * (41 + seed * 2)) % 20000)) for index in range(length))
+
+    intro = f"\u8fd9\u662f {version} \u7248\u672c\u7684\u6d4b\u8bd5\u5bfc\u8bed\uff0c\u7528\u6765\u786e\u8ba4\u5168\u6587\u91cd\u5199\u65f6\u6587\u7ae0\u3001\u5c01\u9762\u548c\u6b63\u6587\u56fe\u7247\u90fd\u80fd\u4fdd\u6301\u4e00\u81f4\u3002"
     sections = [
-        {"heading": f"{version} 小标题一", "body": body * 5, "image_brief": f"{version} 场景一"},
-        {"heading": f"{version} 小标题二", "body": body * 5, "image_brief": f"{version} 场景二"},
-        {"heading": f"{version} 小标题三", "body": body * 5, "image_brief": f"{version} 场景三"},
+        {"heading": f"{version} \u4e8b\u5b9e\u68b3\u7406", "body": f"{version} \u4e8b\u5b9e\u68b3\u7406\u8bf4\u660e\u516c\u5f00\u8d44\u6599\u3001\u53d1\u5e03\u4e3b\u4f53\u548c\u6765\u6e90\u8fb9\u754c\u3002" + filler(11), "image_brief": f"{version} \u573a\u666f\u4e00"},
+        {"heading": f"{version} \u80cc\u666f\u89e3\u91ca", "body": f"{version} \u80cc\u666f\u89e3\u91ca\u533a\u5206\u4e8b\u5b9e\u3001\u89c2\u70b9\u548c\u540e\u7eed\u9700\u8981\u6838\u9a8c\u7684\u4fe1\u606f\u3002" + filler(12), "image_brief": f"{version} \u573a\u666f\u4e8c"},
+        {"heading": f"{version} \u4f20\u64ad\u98ce\u9669", "body": f"{version} \u4f20\u64ad\u98ce\u9669\u63d0\u9192\u8bfb\u8005\u4fdd\u7559\u5224\u65ad\uff0c\u5e76\u7b49\u5f85\u6743\u5a01\u6765\u6e90\u66f4\u65b0\u3002" + filler(13), "image_brief": f"{version} \u573a\u666f\u4e09"},
+        {"heading": f"{version} \u5f71\u54cd\u5206\u6790", "body": f"{version} \u5f71\u54cd\u5206\u6790\u5173\u6ce8\u6d41\u7a0b\u3001\u7528\u6237\u548c\u540e\u7eed\u5904\u7f6e\u7684\u53ef\u80fd\u53d8\u5316\u3002" + filler(14), "image_brief": f"{version} \u573a\u666f\u56db"},
     ]
-    return {
-        "title": f"文章版本 {version}",
-        "intro": intro,
-        "summary": intro,
-        "content_markdown": "# 文章版本 " + version + "\n\n" + intro + "\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections),
-        "sections": sections,
-        "images": [],
-    }
+    return {"title": f"\u6587\u7ae0\u7248\u672c {version}", "intro": intro, "summary": intro, "content_markdown": "# \u6587\u7ae0\u7248\u672c " + version + "\n\n" + intro + "\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections), "sections": sections, "images": []}
 
 
 def _png(path: Path, color: str = "blue") -> None:

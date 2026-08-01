@@ -45,53 +45,43 @@ from providers.text_provider import ProviderError
 
 
 def _good_article(
-    title: str = "测试文章标题",
+    title: str = "\u6d4b\u8bd5\u6587\u7ae0\u6807\u9898",
     intro: str = "",
     section_count: int = 4,
     body_chars_per_section: int = 250,
 ) -> dict[str, Any]:
     """Build an article dict that would pass quality gate."""
-    if not intro:
-        intro = "最近某事件引发了广泛关注。本文基于公开资料梳理事件经过和各方回应。"
-    # Generate enough Chinese text for each section
-    base_text = (
-        "根据公开信息分析，这一事件涉及多个层面的复杂因素。"
-        "核验路径上，读者需要优先查看权威信息，再对照各方公开回应。"
-        "背景解释上，事件形成并非单一原因，而是流程、沟通和执行环节共同作用。"
-        "从时间线来看，事件最早可以追溯到上月的一次常规操作，随后逐渐演变为公众关注的热点话题。"
-        "各方对此事的反应也有所不同，有的表达了关切，有的则在等待更多信息确认。"
-        "从目前可获取的公开资料来看，相关方正在积极应对并推进后续处理流程。"
-        "影响分析上，这类事件会改变用户预期，也会推动相关主体重新审视内部流程。"
-        "普通读者启示是，不宜只看片段传播，更应把结论建立在可核验资料之上。"
-        "业内人士指出，这一案例为行业合规管理提供了有价值的参考样本。"
-    )
-    sections = []
-    headings = [
-        "事件发生了什么",
-        "为什么受到关注",
-        "可能带来哪些影响",
-        "后续值得关注什么",
-        "补充分析",
-        "总结",
-    ]
-    for i in range(min(section_count, len(headings))):
-        body = base_text * (max(1, body_chars_per_section // len(base_text) + 1))
-        body = body[: body_chars_per_section * 3]  # rough char budget
-        sections.append({"heading": headings[i], "body": body, "image_brief": "测试场景"})
+    def filler(seed: int, length: int) -> str:
+        return "".join(chr(0x4E00 + ((seed * 3001 + index * (43 + seed * 2)) % 20000)) for index in range(length))
 
+    if not intro:
+        intro = "\u6700\u8fd1\u67d0\u4e8b\u4ef6\u5f15\u53d1\u5173\u6ce8\uff0c\u672c\u6587\u57fa\u4e8e\u516c\u5f00\u8d44\u6599\u68b3\u7406\u7ecf\u8fc7\u3001\u80cc\u666f\u548c\u540e\u7eed\u6838\u9a8c\u8def\u5f84\u3002"
+    headings = ["\u4e8b\u4ef6\u7ecf\u8fc7", "\u6838\u9a8c\u8def\u5f84", "\u5f71\u54cd\u5206\u6790", "\u8bfb\u8005\u542f\u793a", "\u540e\u7eed\u5173\u6ce8", "\u8865\u5145\u5206\u6790"]
+    prefixes = [
+        "\u4e8b\u5b9e\u68b3\u7406\u6bb5\u843d\u4ea4\u4ee3\u516c\u5f00\u6765\u6e90\u3001\u76f8\u5173\u4e3b\u4f53\u548c\u5df2\u7ecf\u786e\u8ba4\u7684\u4fe1\u606f\u3002",
+        "\u6838\u9a8c\u8def\u5f84\u6bb5\u843d\u63d0\u9192\u8bfb\u8005\u67e5\u770b\u539f\u59cb\u94fe\u63a5\u3001\u53d1\u5e03\u65f6\u95f4\u548c\u6743\u5a01\u56de\u5e94\u3002",
+        "\u80cc\u666f\u89e3\u91ca\u6bb5\u843d\u628a\u4e8b\u4ef6\u653e\u56de\u5230\u884c\u4e1a\u6d41\u7a0b\u548c\u516c\u5171\u8ba8\u8bba\u4e2d\u7406\u89e3\u3002",
+        "\u4f20\u64ad\u98ce\u9669\u6bb5\u843d\u8bf4\u660e\u7247\u6bb5\u4fe1\u606f\u53ef\u80fd\u9020\u6210\u8bef\u8bfb\uff0c\u9700\u8981\u7ee7\u7eed\u6838\u5b9e\u3002",
+        "\u8bfb\u8005\u542f\u793a\u6bb5\u843d\u5f15\u5bfc\u666e\u901a\u7528\u6237\u628a\u5224\u65ad\u5efa\u7acb\u5728\u53ef\u6838\u9a8c\u8d44\u6599\u4e0a\u3002",
+        "\u540e\u7eed\u5173\u6ce8\u6bb5\u843d\u8bf4\u660e\u8fd8\u8981\u770b\u662f\u5426\u6709\u65b0\u8bc1\u636e\u3001\u65b0\u56de\u5e94\u6216\u65b0\u5904\u7f6e\u3002",
+    ]
+    sections = []
+    for i in range(min(section_count, len(headings))):
+        body = prefixes[i] + filler(i + 1, max(220, body_chars_per_section))
+        sections.append({"heading": headings[i], "body": body, "image_brief": "\u6d4b\u8bd5\u573a\u666f"})
     markdown = "\n\n".join(
         [f"# {title}", intro]
         + [f"## {s['heading']}\n{s['body']}" for s in sections]
-        + ["## 资料来源\n[1] 测试来源：《测试标题》，2026年7月\n原文链接：https://example.com",
-           "AI辅助声明：本文基于公开资料整理生成，发布前请再次核对关键信息。"]
+        + ["## \u8d44\u6599\u6765\u6e90\n[1] \u6d4b\u8bd5\u6765\u6e90\uff1a\u300a\u6d4b\u8bd5\u6807\u9898\u300b\uff0c2026\u5e747\u6708\n\u539f\u6587\u94fe\u63a5\uff1ahttps://example.com",
+           "AI\u8f85\u52a9\u58f0\u660e\uff1a\u672c\u6587\u57fa\u4e8e\u516c\u5f00\u8d44\u6599\u6574\u7406\u751f\u6210\uff0c\u53d1\u5e03\u524d\u8bf7\u518d\u6b21\u6838\u5bf9\u5173\u952e\u4fe1\u606f\u3002"]
     )
     return {
         "title": title,
         "intro": intro,
         "sections": sections,
         "content_markdown": markdown,
-        "source_list": ["[1] 测试来源：《测试标题》，2026年7月\n原文链接：https://example.com"],
-        "ai_statement": "AI辅助声明：本文基于公开资料整理生成，发布前请再次核对关键信息。",
+        "source_list": ["[1] \u6d4b\u8bd5\u6765\u6e90\uff1a\u300a\u6d4b\u8bd5\u6807\u9898\u300b\uff0c2026\u5e747\u6708\n\u539f\u6587\u94fe\u63a5\uff1ahttps://example.com"],
+        "ai_statement": "AI\u8f85\u52a9\u58f0\u660e\uff1a\u672c\u6587\u57fa\u4e8e\u516c\u5f00\u8d44\u6599\u6574\u7406\u751f\u6210\uff0c\u53d1\u5e03\u524d\u8bf7\u518d\u6b21\u6838\u5bf9\u5173\u952e\u4fe1\u606f\u3002",
         "fact_basis": [],
         "recommended_status": "completed",
         "text_generation_calls": 1,
@@ -221,16 +211,14 @@ class TestQualityGateDegradation:
         assert result["passed"], f"good article should pass, got: {result.get('hard_errors')}"
         assert result["status"] in ("passed", "warning"), f"unexpected status: {result['status']}"
 
-    def test_fallback_article_gets_warning_not_failed(self):
-        """A fallback article with complete structure must be warning, not failed."""
+    def test_fallback_article_requires_retry(self):
+        """A fallback article must fail the formal quality gate and require retry."""
         article = _fallback_article()
         bundle = _zero_source_bundle()
         result = quality_gate(article, bundle)
-        assert result["status"] != "failed", (
-            f"fallback article should NOT be failed, got status={result['status']}, "
-            f"hard_errors={result.get('hard_errors')}"
-        )
-        assert result["passed"], f"fallback article should pass: {result.get('hard_errors')}"
+        assert result["status"] == "failed"
+        assert "ARTICLE_TEXT_RETRY_REQUIRED" in result["hard_errors"]
+        assert result["passed"] is False
 
     def test_article_with_minimal_structure_recognized(self):
         """_article_has_minimal_structure returns True for complete fallback article."""
@@ -441,7 +429,7 @@ class TestArticleExportGateLogic:
                 raise ProviderError("ARTICLE_NOT_FINAL", "article is not final")
         assert exc_info.value.code == "ARTICLE_NOT_FINAL"
 
-    def test_zero_source_fallback_passes_gate(self):
+    def test_zero_source_fallback_requires_retry_gate(self):
         """Zero-source fallback article must pass both gates (status + quality_gate)."""
         article = _fallback_article()
         state = {
@@ -453,9 +441,8 @@ class TestArticleExportGateLogic:
         assert state["status"] in self.EXPORTABLE_ARTICLE_STATUSES, (
             f"status={state['status']} not exportable"
         )
-        assert state["quality_gate"]["status"] != "failed", (
-            f"quality_gate status={state['quality_gate']['status']} is failed"
-        )
+        assert state["quality_gate"]["status"] == "failed"
+        assert "ARTICLE_TEXT_RETRY_REQUIRED" in state["quality_gate"]["hard_errors"]
 
 
 # ── Test 5: Consistent body_char_count in fallback paths ──
@@ -511,8 +498,10 @@ class TestPromptRetained:
         angle = {"name": "分析", "instruction": "分析", "structure": [], "must_avoid": []}
         prompt = _prompt(topic, angle, "热点资讯", "客观通俗", 1200, research_bundle={"accepted_source_count": 1, "sources": []})
         # R1.2.1: 分类标题动态生成，至少应有多个 ## 标题
-        heading_count = prompt.count("## ")
-        assert heading_count >= 3, f"Expected >= 3 subheadings, got {heading_count}"
+        # P0: classified structure remains as rhythm guidance, while public headings are dynamic.
+        assert "3\uff5e5" in prompt or "3~5" in prompt
+        assert "\u4e0d\u5f97\u4f7f\u7528" in prompt and "\u4e8b\u4ef6\u6982\u89c8" in prompt
+        assert prompt.count("## ") == 0
 
     def test_prompt_forbids_json_and_code_fences(self):
         """Prompt must forbid JSON output and code fences."""

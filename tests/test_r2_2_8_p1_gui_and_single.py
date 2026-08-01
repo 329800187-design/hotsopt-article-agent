@@ -94,16 +94,21 @@ def test_STUCK_ACTION_BUTTONS_REQUEST_REAL_PARENT_ACTION_PASS():
 
 
 def test_QUALITY_GATE_WARNINGS_DO_NOT_BLOCK_DRAFT_PASS():
-    bundle = {"accepted_source_count": 1, "official_or_reliable_source_count": 1, "sources": [{"source_id": "s1", "fetch_success": True, "accepted_for_research": True, "content": "某公司发布公告。"}]}
-    section_body = "根据现有公开资料，某公司发布公告。读者可以核验公告来源，留意传播风险，并结合背景原因判断信息。"
+    bundle = {"accepted_source_count": 1, "official_or_reliable_source_count": 1, "sources": [{"source_id": "s1", "fetch_success": True, "accepted_for_research": True, "content": "\u67d0\u516c\u53f8\u53d1\u5e03\u516c\u544a\u3002"}]}
+
+    def filler(seed: int, length: int = 310) -> str:
+        return "".join(chr(0x4E00 + ((seed * 3001 + index * (53 + seed * 2)) % 20000)) for index in range(length))
+
+    sections = [
+        {"heading": "\u6838\u9a8c\u8def\u5f84", "body": "\u6838\u9a8c\u8def\u5f84\u8981\u5bf9\u7167\u516c\u544a\u6765\u6e90\u548c\u53d1\u5e03\u4e3b\u4f53\u3002" + filler(31)},
+        {"heading": "\u4f20\u64ad\u98ce\u9669", "body": "\u4f20\u64ad\u98ce\u9669\u63d0\u9192\u8bfb\u8005\u4e0d\u8981\u628a\u672a\u6838\u5b9e\u89e3\u8bfb\u5199\u6210\u4e8b\u5b9e\u3002" + filler(32)},
+        {"heading": "\u80cc\u666f\u89e3\u91ca", "body": "\u80cc\u666f\u89e3\u91ca\u8bf4\u660e\u516c\u5f00\u8d44\u6599\u3001\u5f71\u54cd\u5206\u6790\u548c\u8bfb\u8005\u5224\u65ad\u4e4b\u95f4\u7684\u5173\u7cfb\u3002" + filler(33)},
+    ]
+    intro = "\u8fd9\u662f\u4e00\u7bc7\u7ed3\u6784\u5b8c\u6574\u4f46\u5b57\u6570\u7565\u4f4e\u7684\u6d4b\u8bd5\u8349\u7a3f\uff0c\u7528\u6765\u786e\u8ba4 warning \u7ea7\u522b\u4e0d\u4f1a\u963b\u65ad\u53ef\u7f16\u8f91\u6210\u54c1\u3002"
     article = {
-        "intro": "这是一篇结构完整但字数略低的测试草稿，用来确认 warning 级别不会阻断可编辑成品。",
-        "sections": [
-            {"heading": "核验路径", "body": section_body * 4},
-            {"heading": "传播风险", "body": section_body * 4},
-            {"heading": "背景解释", "body": section_body * 4},
-        ],
-        "content_markdown": section_body * 12,
+        "intro": intro,
+        "sections": sections,
+        "content_markdown": "# \u6d4b\u8bd5\u6587\u7ae0\n\n" + intro + "\n\n" + "\n\n".join(f"## {section['heading']}\n{section['body']}" for section in sections),
         "fact_basis": [],
         "word_count": 1200,
     }

@@ -82,26 +82,30 @@ def _angle(name: str = "事件还原") -> dict[str, str]:
 
 
 def _skeleton_article(body_char_count: int = 900) -> dict[str, Any]:
-    """生成一个具有足够字数的测试文章。"""
-    filler = "这是一个测试段落用于填充文章正文字数。" * max(1, body_char_count // 15)
+    """Generate a structurally complete article without repetition-fixture noise."""
+    def filler(seed: int, length: int) -> str:
+        return "".join(chr(0x4E00 + ((seed * 3001 + index * (59 + seed * 2)) % 20000)) for index in range(length))
+
+    intro = "\u8fd9\u662f\u5bfc\u8bed\uff0c\u7528\u4e8e\u6d4b\u8bd5\u6587\u7ae0\u7ed3\u6784\u3001\u4e8b\u5b9e\u8fb9\u754c\u548c\u8d28\u91cf\u95e8\u9608\u503c\u3002"
+    each = max(220, body_char_count // 3)
     sections = [
-        {"heading": "测试章节一", "body": filler[:body_char_count // 3], "image_brief": "测试"},
-        {"heading": "测试章节二", "body": filler[body_char_count // 3 : 2 * body_char_count // 3], "image_brief": "测试"},
-        {"heading": "测试章节三", "body": filler[2 * body_char_count // 3 :], "image_brief": "测试"},
+        {"heading": "\u6838\u9a8c\u8def\u5f84", "body": "\u8bfb\u8005\u53ef\u4ee5\u901a\u8fc7\u6765\u6e90\u3001\u65f6\u95f4\u548c\u53d1\u5e03\u4e3b\u4f53\u6838\u9a8c\u4fe1\u606f\u3002" + filler(41, each), "image_brief": "\u6d4b\u8bd5"},
+        {"heading": "\u4f20\u64ad\u98ce\u9669", "body": "\u8fd9\u7c7b\u6807\u9898\u5bb9\u6613\u5f15\u53d1\u8bef\u8bfb\uff0c\u9700\u8981\u533a\u5206\u4e8b\u5b9e\u3001\u63a8\u6d4b\u548c\u60c5\u7eea\u8868\u8fbe\u3002" + filler(42, each), "image_brief": "\u6d4b\u8bd5"},
+        {"heading": "\u8bfb\u8005\u542f\u793a", "body": "\u8bfb\u8005\u542f\u793a\u662f\u5148\u770b\u516c\u5f00\u8d44\u6599\u662f\u5426\u5b8c\u6574\uff0c\u518d\u6bd4\u8f83\u4e0d\u540c\u4fe1\u606f\u4e4b\u95f4\u662f\u5426\u4e92\u76f8\u5370\u8bc1\u3002" + filler(43, each), "image_brief": "\u6d4b\u8bd5"},
     ]
     article = {
-        "title": "测试文章标题",
-        "intro": "这是导语，用于测试文章结构。" * 3,
+        "title": "\u6d4b\u8bd5\u6587\u7ae0\u6807\u9898",
+        "intro": intro,
         "sections": sections,
-        "content_markdown": f"# 测试文章标题\n\n这是导语。\n\n## 测试章节一\n{filler}\n\n## 测试章节二\n\n## 资料来源\n来源A\n\nAI辅助声明",
-        "source_list": ["来源A：https://example.com/source"],
-        "source_statement": "来源A",
-        "ai_statement": "AI辅助声明：本文为测试内容。",
+        "content_markdown": "# \u6d4b\u8bd5\u6587\u7ae0\u6807\u9898\n\n" + intro + "\n\n" + "\n\n".join(f"## {section['heading']}\n{section['body']}" for section in sections),
+        "source_list": ["\u6765\u6e90A\uff1ahttps://example.com/source"],
+        "source_statement": "\u6765\u6e90A",
+        "ai_statement": "AI\u8f85\u52a9\u58f0\u660e\uff1a\u672c\u6587\u4e3a\u6d4b\u8bd5\u5185\u5bb9\u3002",
         "body_char_count": body_char_count,
         "word_count": 1200,
         "recommended_status": "completed",
-        "tags": ["测试"],
-        "summary": "测试摘要",
+        "tags": ["\u6d4b\u8bd5"],
+        "summary": "\u6d4b\u8bd5\u6458\u8981",
         "demo_mode": False,
         "text_generation_calls": 1,
         "text_generation_limit": 1,
@@ -289,18 +293,10 @@ class TestQualityGateDynamicThresholds:
         assert gate["status"] == "failed", f"Expected failed, got {gate['status']}: {gate['hard_errors']}"
 
     def test_1200_wordcount_warning_1000_to_1199(self):
-        """1200字目标：1000-1199 warning（需足够body + 价值段落）"""
+        """1200 target: 1000-1199 should warn or pass when content is not repetitive."""
         article = _skeleton_article(1100)
         article["word_count"] = 1200
-        article["body_char_count"] = 1100
-        article["content_markdown"] = "# T\n\n" + "正文内容详细描述了事件经过，读者可以理解背景。" * 40
-        article["sections"] = [
-            {"heading": "核验路径", "body": "读者可以搜索关键词验证信息。查证来源是判断真实性的第一步。核查方法是搜索原文标题。" * 10, "image_brief": ""},
-            {"heading": "传播风险", "body": "这类标题容易引发误读。传播者应注意核实来源。存在风险。" * 10, "image_brief": ""},
-            {"heading": "读者启示", "body": "读者可以保留判断空间，先看事实是否完整，再看不同信息之间是否互相印证。" * 10, "image_brief": ""},
-        ]
         gate = quality_gate(article, _research_bundle())
-        # 可能warning或passed，取决于段落质量
         assert gate["status"] in ("warning", "passed"), f"Unexpected: {gate['status']}"
 
     def test_1600_wordcount_fail_below_1400(self):
@@ -382,44 +378,17 @@ class TestUnknownPhraseDetection:
         assert gate["status"] == "failed" or has_unknown_error
 
     def test_moderate_unknown_ratio_warns(self):
-        """空话占比4-8% → passed/warning（足够正文稀释空话比例）"""
+        """A small amount of uncertain wording should not hard-fail a complete article."""
         article = _skeleton_article(1100)
-        article["word_count"] = 1200
-        article["body_char_count"] = 1100
-        # 大量实质内容稀释空话比例
-        content_body = (
-            "围绕此事件，本文详细梳理了事件经过和发展脉络。"
-            "根据多方信息来源交叉核实，关键事实包括时间、地点和涉及人物均已确认。"
-            "背景原因涉及多个层面，包括制度设计、执行管理和个体行为等因素。"
-            "影响分析显示，此类事件对相关行业、公众认知和后续政策均有直接和间接影响。"
-            "我认为有必要从三个维度来理解：短期影响、中期趋势和长期格局。"
-            "读者可以通过搜索原标题、查看权威发布渠道来核验信息的准确性。"
-            "类似案例在过去曾有发生，可以参考此前的处置方式和结果。"
-        ) * 5
-        content_body += "尚未确认部分细节。" * 1  # 极少空话，占比远低于4%
-        article["content_markdown"] = content_body
-        article["sections"] = [
-            {"heading": "核验路径", "body": "读者可以通过搜索引擎核验信息真实性。查证步骤包括验证发布来源是否权威。读者启示是不要轻信单一来源。" * 8, "image_brief": ""},
-            {"heading": "传播风险", "body": "此事件背景涉及多方面因素。存在误读风险，谣言可能误导公众。需要注意核实信息后再传播。" * 8, "image_brief": ""},
-            {"heading": "背景解释", "body": "从背景和原因看，信息进入公共讨论后需要区分事实、推测和情绪表达，避免把片段内容当成完整结论。" * 8, "image_brief": ""},
-        ]
+        article["content_markdown"] += "\n\n\u5c1a\u672a\u786e\u8ba4\u90e8\u5206\u7ec6\u8282\u3002"
+        article["sections"][0]["body"] += "\u5c1a\u672a\u786e\u8ba4\u90e8\u5206\u7ec6\u8282\u3002"
         gate = quality_gate(article, _research_bundle(accepted_count=2))
-        # 合理内容+极少空话应通过
         assert gate["status"] in ("passed", "warning"), \
             f"Unexpected: {gate['status']} hard_errors={gate.get('hard_errors', [])}"
 
     def test_value_sections_minimum_two(self):
-        """文章至少2类价值段落"""
+        """Article with verification, risk, and reader guidance sections should pass value coverage."""
         article = _skeleton_article(1200)
-        article["word_count"] = 1200
-        article["body_char_count"] = 1200
-        # 构造有"核验路径"和"传播风险"的段落
-        article["content_markdown"] = f"# T\n\n读者可以核验信息。存在误读风险。背景是重要原因。" * 10
-        article["sections"] = [
-            {"heading": "核验路径", "body": "读者可以通过搜索引擎核验信息真实性。查证步骤包括验证来源。" * 10, "image_brief": ""},
-            {"heading": "传播风险", "body": "这类信息容易被误读，存在风险。传播者应注意核实。" * 10, "image_brief": ""},
-            {"heading": "读者启示", "body": "读者启示是把情绪判断放在事实核查之后，先确认来源，再比较不同说法。" * 10, "image_brief": ""},
-        ]
         gate = quality_gate(article, _research_bundle(accepted_count=2))
         assert gate["status"] in ("passed", "warning")
 
@@ -676,16 +645,9 @@ class TestR12Regression:
     """旧 R1.2 回归测试"""
 
     def test_quality_gate_accepts_known_structure(self):
-        """已知结构的文章通过质量门"""
+        """Known structure article passes the quality gate when fixture text is non-repetitive."""
         article = _skeleton_article(1100)
         article["word_count"] = 1200
-        article["body_char_count"] = 1100
-        article["content_markdown"] = "# T\n\n" + "读者可以核验信息的真实性。" * 50 + "\n\n## 资料来源\n来源\n\nAI辅助声明"
-        article["sections"] = [
-            {"heading": "核验路径", "body": "读者可以核验信息的真实性和来源可靠性。" * 15, "image_brief": ""},
-            {"heading": "传播风险", "body": "存在误读风险需要读者注意。" * 15, "image_brief": ""},
-            {"heading": "读者启示", "body": "读者启示是先核实来源，再判断相关说法是否存在夸张或遗漏。" * 15, "image_brief": ""},
-        ]
         gate = quality_gate(article, _research_bundle(accepted_count=2))
         assert gate["status"] != "failed", f"Unexpected failed: {gate['hard_errors']}"
 

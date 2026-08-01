@@ -11,17 +11,16 @@ FIXTURE = ROOT / "tests" / "fixtures" / "r2251_real_evidence_min.json"
 
 
 def _long_sections(content: str) -> list[dict]:
-    article_content = content.split("资料来源", 1)[0].split("参考资料", 1)[0]
-    paragraph = (
-        f"{article_content} 从背景解释看，相关事实需要放在公开资料和来源归属中理解，不能把资料来源列表里的数字误判为正文主张。"
-        "从影响分析看，读者需要知道哪些内容已经由来源支持，哪些只是后续观察方向。"
-        "从核验路径看，文章应优先核对发布日期、机构名称、地点和数字，再判断网络传播中的延伸说法是否可靠。"
-    )
+    article_content = content.split("\u8d44\u6599\u6765\u6e90", 1)[0].split("\u53c2\u8003\u8d44\u6599", 1)[0]
+
+    def filler(seed: int, length: int = 170) -> str:
+        return "".join(chr(0x4E00 + ((seed * 3001 + index * (47 + seed * 2)) % 20000)) for index in range(length))
+
     return [
-        {"heading": "事件发生了什么", "body": paragraph + "\n\n" + paragraph},
-        {"heading": "为什么受到关注", "body": paragraph + "\n\n" + paragraph},
-        {"heading": "可能带来哪些影响", "body": paragraph + "\n\n" + paragraph},
-        {"heading": "后续值得关注什么", "body": paragraph + "\n\n" + paragraph},
+        {"heading": "\u4e8b\u4ef6\u53d1\u751f\u4e86\u4ec0\u4e48", "body": article_content + " \u4e8b\u5b9e\u68b3\u7406\u4fdd\u7559\u6765\u6e90\u5f52\u5c5e\u548c\u53ef\u6838\u9a8c\u8fb9\u754c\u3002" + filler(21) + "\n\n" + filler(121)},
+        {"heading": "\u4e3a\u4ec0\u4e48\u53d7\u5230\u5173\u6ce8", "body": "\u80cc\u666f\u89e3\u91ca\u8981\u628a\u4e8b\u4ef6\u653e\u5728\u516c\u5f00\u8d44\u6599\u3001\u53d1\u5e03\u4e3b\u4f53\u548c\u8bfb\u8005\u5173\u5207\u4e2d\u7406\u89e3\u3002" + filler(22) + "\n\n" + filler(122)},
+        {"heading": "\u53ef\u80fd\u5e26\u6765\u54ea\u4e9b\u5f71\u54cd", "body": "\u5f71\u54cd\u5206\u6790\u53ea\u63d0\u51fa\u89c2\u5bdf\u65b9\u5411\uff0c\u4e0d\u8865\u5199\u6765\u6e90\u6ca1\u6709\u652f\u6301\u7684\u91d1\u989d\u3001\u4eba\u6570\u6216\u5904\u7f6e\u7ed3\u8bba\u3002" + filler(23) + "\n\n" + filler(123)},
+        {"heading": "\u540e\u7eed\u503c\u5f97\u5173\u6ce8\u4ec0\u4e48", "body": "\u6838\u9a8c\u8def\u5f84\u548c\u8bfb\u8005\u542f\u793a\u63d0\u9192\u7ee7\u7eed\u67e5\u770b\u539f\u59cb\u94fe\u63a5\u3001\u53d1\u5e03\u65f6\u95f4\u548c\u6743\u5a01\u56de\u5e94\u3002" + filler(24) + "\n\n" + filler(124)},
     ]
 
 

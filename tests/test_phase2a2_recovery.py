@@ -192,14 +192,13 @@ def test_background_generation_uses_persisted_options(tmp_path, monkeypatch):
     monkeypatch.setattr(generation_store, "TASKS_ROOT", tmp_path / "tasks")
     options = {"article_type": "社会民生", "style": "专业分析", "image_style": "二维国漫新闻插画", "word_count": 1200, "image_plan_mode": "standard", "image_generation_requested": True}
     store, task = make_task(tmp_path, options)
-    body = (
-        "根据现有公开资料，文章先交代已经确认的信息，再说明仍待核实的内容。"
-        "读者可以通过来源、时间和主体进行交叉核验，也要注意传播风险和背景原因。"
-    )
+    def filler(seed: int, length: int = 320) -> str:
+        return "".join(chr(0x4E00 + ((seed * 3001 + index * (61 + seed * 2)) % 20000)) for index in range(length))
+
     sections = [
-        {"heading": "事实梳理", "body": body * 5, "image_brief": "现场"},
-        {"heading": "影响分析", "body": body * 5, "image_brief": "现场"},
-        {"heading": "后续关注", "body": body * 5, "image_brief": "现场"},
+        {"heading": "\u4e8b\u5b9e\u68b3\u7406", "body": "\u4e8b\u5b9e\u68b3\u7406\u4ea4\u4ee3\u5df2\u786e\u8ba4\u4fe1\u606f\u548c\u516c\u5f00\u6765\u6e90\u8fb9\u754c\u3002" + filler(51), "image_brief": "\u73b0\u573a"},
+        {"heading": "\u5f71\u54cd\u5206\u6790", "body": "\u5f71\u54cd\u5206\u6790\u8bf4\u660e\u8bfb\u8005\u3001\u673a\u6784\u548c\u540e\u7eed\u6d41\u7a0b\u53ef\u80fd\u53d7\u5230\u7684\u53d8\u5316\u3002" + filler(52), "image_brief": "\u73b0\u573a"},
+        {"heading": "\u6838\u9a8c\u8def\u5f84", "body": "\u6838\u9a8c\u8def\u5f84\u63d0\u9192\u7ee7\u7eed\u67e5\u770b\u53d1\u5e03\u65f6\u95f4\u3001\u4e3b\u4f53\u548c\u6743\u5a01\u56de\u5e94\u3002" + filler(53), "image_brief": "\u73b0\u573a"},
     ]
     monkeypatch.setattr(single_task, "generate_article", lambda *args, **kwargs: {"title": "标题", "intro": "这是一段结构完整的测试导语，用来确认持久化选项会进入后台生成。", "sections": sections, "content_markdown": "# 标题\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections), "demo_mode": False})
 

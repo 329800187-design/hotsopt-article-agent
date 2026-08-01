@@ -363,7 +363,7 @@ def _prompt(
 """
 
     # ── R1.2.1 分类只作为写作节奏，不再把内部/半内部标签暴露给正文小标题 ──
-    classification_heading_lines = "\n".join(f"   ## {heading}" for heading in REQUIRED_SECTION_HEADINGS)
+    classification_heading_lines = "\n".join(f"   - {heading}" for heading in REQUIRED_SECTION_HEADINGS)
     
     prompt = f"""你是一篇中文热点文章的撰稿人。请根据以下资料，生成一篇可直接发布的中文热点稿。你不是摘要工具——必须重新构思标题、导语和段落顺序，形成独立新结构。
 
@@ -385,16 +385,19 @@ def _prompt(
 文章结构（必须严格遵循，这是硬性要求）：
 1. 标题：必须重新生成，不直接复制上述"热点标题"
 2. {length_rule["lead_text"]}
-3. 二级标题（固定顺序，不得增减）：
+3. 二级标题：根据创作角度和事实卡动态生成 3～5 个读者可直接理解的小标题，不得使用“事件概览/已确认信息/背景信息/可能影响/后续关注”这套固定栏目；以下只是节奏参考，不得照抄：
 {classification_heading_lines}
 4. {length_rule["paragraph_rule"]}
 5. {length_rule["paragraph_length"]}
 6. 段落之间空行
 
 正文质量硬要求：
+- 只依据事实卡、资料边界和少量清洗后的引用写作；原始网页全文只能用于核验，不得整段复制进正文。
 - “写作节奏参考”和括号里的“钩子开头、30秒速览、单点深挖、观点判断、结尾互动”等词是内部写作提示，绝不能原样作为小标题输出。
 - 小标题必须是读者能直接理解的内容标题，不能像提纲标签、模板标签或创作说明。
 - 每个小节必须包含：事实信息（发生了什么）+ 解释说明（为什么）+ 读者关心点（关我什么事）
+- 同一核心事实最多允许在导语概括一次、正文展开一次，不能换词重复填充字数。
+- 禁止出现网页模板和预览污染：{{、}}、dynamicData、subjectData、item.reporter_name、item.tag、未发布文章、仅支持15分钟预览、打开新闻客户端、阅读体验更佳。
 - 禁止连续使用以下套话（全文同一条不超过 2 次）："从现有信息看""值得关注""引发关注""具有重要意义""仍需等待""后续仍需""尚未确认""仍待核实""公开信息有限"
 - 禁止写成公告摘要
 - 禁止写成多个来源的摘要拼接
@@ -696,6 +699,29 @@ def _complete_article_structure(article: dict[str, Any], topic: HotTopic, angle:
     result["summary"] = intro or str(result.get("summary") or "").strip()
 
     raw_sections = [section for section in (result.get("sections") or []) if isinstance(section, dict) and str(section.get("body") or "").strip()]
+    if headings == REQUIRED_SECTION_HEADINGS and 3 <= len(raw_sections) <= 5:
+        dynamic_sections: list[dict[str, Any]] = []
+        for index, section in enumerate(raw_sections[:5], start=1):
+            heading = _public_section_heading(str(section.get("heading") or "").strip(), f"正文 {index}")
+            if heading in {"事件概览", "已确认信息", "背景信息", "可能影响", "后续关注"}:
+                heading = f"关键进展 {index}"
+            body = str(section.get("body") or "").strip()
+            dynamic_sections.append(
+                {
+                    **section,
+                    "heading": heading,
+                    "body": "\n\n".join(_split_dense_paragraph(body, target=180)),
+                    "image_brief": str(section.get("image_brief") or f"{heading}相关的真实新闻场景，无文字").strip(),
+                }
+            )
+        result["sections"] = dynamic_sections
+        sources = normalize_source_list(result.get("source_list") or [])
+        if not sources:
+            sources = _topic_source_list(topic)
+        result["source_list"] = sources
+        result["source_statement"] = "\n\n".join(sources)
+        result["ai_statement"] = ""
+        return _sync_article_markdown_fields(result)
     merged_by_heading: dict[str, dict[str, Any]] = {}
     unused: list[dict[str, Any]] = []
     for section in raw_sections:
@@ -1220,6 +1246,92 @@ def _apply_short_article_rewrite(
     article["warning_note"] = "模型第二次重写未优于首稿，已保留首稿，建议用户主动重新生成。"
     article["review_required"] = True
     return article, diagnostic
+
+
+def _quality_issue_rewrite_prompt(
+    *,
+    topic: HotTopic,
+    angle: dict[str, str],
+    article_type: str,
+    style: str,
+    requested_word_count: int,
+    current_article: dict[str, Any],
+    issue_list: list[str],
+    research_bundle: dict[str, Any] | None,
+) -> str:
+    target_min, target_max = _rewrite_target_range(requested_word_count)
+    current_body = str(current_article.get("content_markdown") or "")[:2600]
+    issues = "\n".join(f"- {item}" for item in issue_list[:12])
+    prompt = f"""请根据质量检查问题重写完整文章。不要解释，不要输出 JSON，不要输出资料来源或调试内容。
+
+热点标题：{topic.title}
+创作角度：{angle.get('name') or '热点解读'}（{angle.get('instruction') or ''}）
+文章类型：{article_type}
+表达风格：{style}
+
+质量问题：
+{issues}
+
+可用事实卡和资料边界：
+{_fact_card_block(research_bundle)}
+
+当前稿仅供理解问题，不能复制其重复段落或污染文本：
+{current_body}
+
+重写要求：
+1. 正文中文汉字目标 {target_min}～{target_max}，7～10 个自然段。
+2. 使用 3～5 个动态二级标题，不能使用“事件概览/已确认信息/背景信息/可能影响/后续关注”这套固定小标题。
+3. 同一核心事实最多在导语概括一次、正文展开一次，其他段落不得换词重复。
+4. 不得出现 {{、}}、dynamicData、item.reporter_name、item.tag、未发布文章、打开新闻客户端、阅读体验更佳等网页模板或 App 提示。
+5. 不复制完整来源原文，不写“模型异常”“基础稿”“AI声明”。
+6. 不得虚构人物、人数、金额、伤亡、处罚、判决和官方结论。
+
+输出结构：
+# 标题
+导语一段
+## 动态小标题
+正文自然段"""
+    return _prompt_clip(prompt.strip())
+
+
+def _apply_quality_issue_rewrite(
+    *,
+    provider: OpenAITextProvider,
+    topic: HotTopic,
+    angle: dict[str, str],
+    article_type: str,
+    style: str,
+    requested_word_count: int,
+    article: dict[str, Any],
+    issue_list: list[str],
+    required_headings: tuple[str, ...],
+    research_bundle: dict[str, Any] | None,
+    stats: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if bool(article.get("used_local_fallback")) or not issue_list:
+        return article, dict(provider.last_diagnostic or {})
+    if _call_reason_used(stats, "QUALITY_ISSUE_REWRITE"):
+        return article, dict(provider.last_diagnostic or {})
+    if int(stats.get("text_generation_calls") or 0) >= int(stats.get("text_generation_limit") or MAX_TEXT_GENERATION_CALLS):
+        return article, dict(provider.last_diagnostic or {})
+    _register_text_generation_call(stats, "QUALITY_ISSUE_REWRITE")
+    prompt = _quality_issue_rewrite_prompt(
+        topic=topic,
+        angle=angle,
+        article_type=article_type,
+        style=style,
+        requested_word_count=requested_word_count,
+        current_article=article,
+        issue_list=issue_list,
+        research_bundle=research_bundle,
+    )
+    response = provider.generate(prompt, temperature=0.5, max_tokens=_rewrite_token_budget(requested_word_count))
+    diagnostic = dict(provider.last_diagnostic or {})
+    candidate, _parsed = _parse_model_article_response(response, topic, angle)
+    candidate = _complete_article_structure(candidate, topic, angle, required_headings)
+    candidate = _polish_article_delivery(candidate, topic, required_headings, requested_word_count)
+    candidate["text_generation_second_call_reason"] = "QUALITY_ISSUE_REWRITE"
+    return candidate, diagnostic
 
 def generate_article(
     topic: HotTopic,

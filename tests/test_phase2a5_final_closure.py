@@ -101,14 +101,13 @@ def test_retry_cover_updates_public_model_info_without_text_retry(tmp_path, monk
 
     def article(*args, **kwargs):
         calls["text"] += 1
-        body = (
-            "根据现有公开资料，文章先交代已经确认的信息，再说明仍待核实的内容。"
-            "读者可以通过来源、时间和主体进行交叉核验，也要注意传播风险和背景原因。"
-        )
+        def filler(seed: int, length: int = 320) -> str:
+            return "".join(chr(0x4E00 + ((seed * 3001 + index * (67 + seed * 2)) % 20000)) for index in range(length))
+
         sections = [
-            {"heading": "事实梳理", "body": body * 5, "image_brief": "场景"},
-            {"heading": "影响分析", "body": body * 5, "image_brief": "场景"},
-            {"heading": "后续关注", "body": body * 5, "image_brief": "场景"},
+            {"heading": "\u4e8b\u5b9e\u68b3\u7406", "body": "\u4e8b\u5b9e\u68b3\u7406\u4fdd\u7559\u6765\u6e90\u3001\u65f6\u95f4\u548c\u4e3b\u4f53\u4fe1\u606f\u3002" + filler(61), "image_brief": "\u573a\u666f"},
+            {"heading": "\u5f71\u54cd\u5206\u6790", "body": "\u5f71\u54cd\u5206\u6790\u5173\u6ce8\u4e8b\u4ef6\u5bf9\u8bfb\u8005\u9884\u671f\u548c\u5904\u7f6e\u6d41\u7a0b\u7684\u4f5c\u7528\u3002" + filler(62), "image_brief": "\u573a\u666f"},
+            {"heading": "\u6838\u9a8c\u8def\u5f84", "body": "\u6838\u9a8c\u8def\u5f84\u8981\u5bf9\u7167\u516c\u5f00\u8d44\u6599\u3001\u540e\u7eed\u8bf4\u660e\u548c\u4e0d\u540c\u6765\u6e90\u3002" + filler(63), "image_brief": "\u573a\u666f"},
         ]
         return {"title": "真实标题", "intro": "这是一段结构完整的测试导语，用来确认封面重试不会重新调用文本模型。", "summary": "这是一段结构完整的测试导语，用来确认封面重试不会重新调用文本模型。", "sections": sections, "content_markdown": "# 真实标题\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections), "tags": [], "demo_mode": False}
 

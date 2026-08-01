@@ -18,19 +18,18 @@ from providers.text_provider import OpenAITextProvider, _headers
 
 
 def article_value() -> dict:
-    intro = "这是一段用于测试的文章导语，说明事件背景、写作角度和读者需要关注的核心信息，确保结构完整。"
-    body = (
-        "根据现有公开资料，文章需要先交代已经确认的信息，再说明仍待核实的部分。"
-        "读者可以通过来源、时间、主体和具体表述进行交叉核验，避免把片段内容当成完整结论。"
-        "这种写法保留事实边界，也能让后续图片、导出和重试流程在真实文章结构下运行。"
-    )
+    def filler(seed: int, length: int = 260) -> str:
+        return "".join(chr(0x4E00 + ((seed * 3001 + index * (37 + seed * 2)) % 20000)) for index in range(length))
+
+    intro = "\u8fd9\u662f\u4e00\u6bb5\u7528\u4e8e\u6d4b\u8bd5\u7684\u6587\u7ae0\u5bfc\u8bed\uff0c\u8bf4\u660e\u4e8b\u4ef6\u80cc\u666f\u3001\u5199\u4f5c\u89d2\u5ea6\u548c\u8bfb\u8005\u9700\u8981\u5173\u6ce8\u7684\u6838\u5fc3\u4fe1\u606f\u3002"
     sections = [
-        {"heading": "事实梳理", "body": body * 4, "image_brief": "新闻现场"},
-        {"heading": "影响分析", "body": body * 4, "image_brief": "人物思考"},
-        {"heading": "后续关注", "body": body * 4, "image_brief": "公开信息"},
+        {"heading": "\u4e8b\u5b9e\u68b3\u7406", "body": "\u4e8b\u5b9e\u68b3\u7406\u4fdd\u7559\u6765\u6e90\u3001\u65f6\u95f4\u3001\u4e3b\u4f53\u548c\u516c\u5f00\u4fe1\u606f\u8fb9\u754c\uff0c\u907f\u514d\u628a\u7247\u6bb5\u5185\u5bb9\u5f53\u6210\u5b8c\u6574\u7ed3\u8bba\u3002" + filler(1), "image_brief": "\u65b0\u95fb\u73b0\u573a"},
+        {"heading": "\u6838\u9a8c\u8def\u5f84", "body": "\u6838\u9a8c\u8def\u5f84\u8981\u5bf9\u7167\u539f\u59cb\u94fe\u63a5\u3001\u53d1\u5e03\u4e3b\u4f53\u548c\u4e0d\u540c\u6765\u6e90\uff0c\u5e2e\u52a9\u8bfb\u8005\u786e\u8ba4\u53ef\u4fe1\u606f\u3002" + filler(2), "image_brief": "\u8d44\u6599\u6838\u9a8c"},
+        {"heading": "\u5f71\u54cd\u5206\u6790", "body": "\u5f71\u54cd\u5206\u6790\u5173\u6ce8\u666e\u901a\u8bfb\u8005\u3001\u76f8\u5173\u673a\u6784\u548c\u540e\u7eed\u6d41\u7a0b\uff0c\u4f46\u4e0d\u628a\u89c2\u70b9\u5199\u6210\u786c\u4e8b\u5b9e\u3002" + filler(3), "image_brief": "\u4eba\u7269\u601d\u8003"},
+        {"heading": "\u540e\u7eed\u5173\u6ce8", "body": "\u540e\u7eed\u5173\u6ce8\u6743\u5a01\u6765\u6e90\u662f\u5426\u8865\u5145\u8bf4\u660e\uff0c\u5e76\u63d0\u9192\u8bfb\u8005\u5728\u4fe1\u606f\u6838\u5b9e\u540e\u518d\u5f62\u6210\u5224\u65ad\u3002" + filler(4), "image_brief": "\u516c\u5f00\u4fe1\u606f"},
     ]
-    markdown = "# 真实模型文章标题\n\n" + intro + "\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections)
-    return {"title": "真实模型文章标题", "intro": intro, "sections": sections, "content_markdown": markdown, "tags": ["热点"], "fact_basis": ["公开来源"], "closing_quote": "保持核实", "keywords": ["热点"], "source_statement": "来源声明", "demo_mode": False}
+    markdown = "# \u771f\u5b9e\u6a21\u578b\u6587\u7ae0\u6807\u9898\n\n" + intro + "\n\n" + "\n\n".join(f"## {s['heading']}\n{s['body']}" for s in sections)
+    return {"title": "\u771f\u5b9e\u6a21\u578b\u6587\u7ae0\u6807\u9898", "intro": intro, "sections": sections, "content_markdown": markdown, "tags": ["\u70ed\u70b9"], "fact_basis": [], "closing_quote": "\u4fdd\u6301\u6838\u5b9e", "keywords": ["\u70ed\u70b9"], "source_statement": "\u6765\u6e90\u58f0\u660e", "demo_mode": False}
 
 
 def create_phase2a_task(tmp_path: Path) -> tuple[SQLiteStore, dict]:

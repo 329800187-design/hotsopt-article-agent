@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from difflib import SequenceMatcher
 from typing import Any
 
 from generation.image_budget import count_body_chinese_chars
@@ -63,6 +64,128 @@ def _fact_clauses(text: str) -> list[str]:
 
 def _normalize(value: str) -> str:
     return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value or "")).lower()
+
+
+SOURCE_CONTAMINATION_RE = re.compile(
+    r"\{\{|\}\}|dynamicData|subjectData|item\.reporter_name|item\.tag|reporter_name|"
+    r"未发布文章|文章未发布|仅支持\s*15\s*分钟预览|后台刷新重置预览|"
+    r"打开[\u4e00-\u9fffA-Za-z0-9]{0,12}新闻|阅读体验更佳|更多内容请打开|下载\s*APP|APP内打开"
+)
+FIXED_FILLER_HEADINGS = {"事件概览", "已确认信息", "背景信息", "可能影响", "后续关注"}
+
+
+def contamination_hits(text: str) -> list[str]:
+    hits = [match.group(0) for match in SOURCE_CONTAMINATION_RE.finditer(str(text or ""))]
+    return list(dict.fromkeys(hits))[:20]
+
+
+def _body_paragraphs(markdown: str) -> list[str]:
+    lines: list[str] = []
+    for raw in str(markdown or "").replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = raw.strip()
+        if not line:
+            lines.append("")
+            continue
+        if re.match(r"^#\s+", line):
+            continue
+        if re.match(r"^#{2,6}\s+", line):
+            lines.append("")
+            continue
+        lines.append(line)
+    blocks = [item.strip() for item in re.split(r"\n\s*\n+", "\n".join(lines)) if item.strip()]
+    return [item for item in blocks if len(_normalize(item)) >= 10]
+
+
+def _sentence_list(markdown: str) -> list[str]:
+    body = "\n".join(_body_paragraphs(markdown))
+    return [item.strip() for item in re.split(r"[。！？；.!?\n]+", body) if len(_normalize(item)) >= 12]
+
+
+def _repeated_chinese_fragments(text: str, size: int = 30) -> list[str]:
+    compact = "".join(re.findall(r"[\u4e00-\u9fff]", str(text or "")))
+    seen: set[str] = set()
+    repeats: list[str] = []
+    for index in range(0, max(0, len(compact) - size + 1)):
+        fragment = compact[index:index + size]
+        if fragment in seen and fragment not in repeats:
+            repeats.append(fragment)
+            if len(repeats) >= 5:
+                break
+        seen.add(fragment)
+    return repeats
+
+
+def _ngram_similarity(left: str, right: str, n: int) -> float:
+    a = _normalize(left)
+    b = _normalize(right)
+    if len(a) < n or len(b) < n:
+        return 0.0
+    grams_a = {a[index:index + n] for index in range(len(a) - n + 1)}
+    grams_b = {b[index:index + n] for index in range(len(b) - n + 1)}
+    return len(grams_a & grams_b) / max(1, min(len(grams_a), len(grams_b)))
+
+
+def intra_article_quality(article: dict[str, Any]) -> dict[str, Any]:
+    markdown = str(article.get("content_markdown") or "")
+    paragraphs = _body_paragraphs(markdown)
+    sentences = _sentence_list(markdown)
+    heading_hits = re.findall(r"^#{2,6}\s*(.+)$", markdown, flags=re.M)
+    exact_repeats = [
+        paragraph
+        for paragraph, count in Counter(_normalize(item) for item in paragraphs if _normalize(item)).items()
+        if count > 1
+    ]
+    normalized_sentence_repeats = [
+        sentence
+        for sentence, count in Counter(_normalize(item) for item in sentences if len(_normalize(item)) >= 24).items()
+        if count > 1
+    ]
+    similar_pairs: list[dict[str, Any]] = []
+    max_similarity = 0.0
+    for left_index in range(len(paragraphs)):
+        for right_index in range(left_index + 1, len(paragraphs)):
+            left = paragraphs[left_index]
+            right = paragraphs[right_index]
+            seq = SequenceMatcher(None, _normalize(left), _normalize(right)).ratio()
+            gram = max(_ngram_similarity(left, right, 3), _ngram_similarity(left, right, 4))
+            similarity = max(seq, gram)
+            max_similarity = max(max_similarity, similarity)
+            if similarity > 0.82:
+                similar_pairs.append({"left": left_index + 1, "right": right_index + 1, "similarity": round(similarity, 4)})
+    incomplete = [
+        item
+        for item in sentences
+        if re.search(r"(进入了\s*[，,]\s*就|可能进入了\s*[，,]|[，,]\s*就没办法|[的了在将把被与]\s*[。！？]$)", item)
+    ][:5]
+    repeated_fragments = _repeated_chinese_fragments(markdown)
+    fixed_heading_count = sum(1 for heading in heading_hits if heading.strip() in FIXED_FILLER_HEADINGS)
+    failures: list[str] = []
+    if exact_repeats:
+        failures.append("REPEATED_PARAGRAPH")
+    if normalized_sentence_repeats:
+        failures.append("REPEATED_SENTENCE")
+    if repeated_fragments:
+        failures.append("REPEATED_LONG_FRAGMENT")
+    if similar_pairs:
+        failures.append("SIMILAR_PARAGRAPHS")
+    if contamination_hits(markdown):
+        failures.append("SOURCE_CONTENT_CONTAMINATED")
+    if incomplete:
+        failures.append("INCOMPLETE_SENTENCE")
+    if fixed_heading_count >= 4:
+        failures.append("FIXED_FILLER_STRUCTURE")
+    return {
+        "passed": not failures,
+        "failures": list(dict.fromkeys(failures)),
+        "exact_repeated_paragraph_count": len(exact_repeats),
+        "normalized_repeated_sentence_count": len(normalized_sentence_repeats),
+        "repeated_long_fragments": repeated_fragments,
+        "similar_paragraph_pairs": similar_pairs[:10],
+        "max_paragraph_similarity": round(max_similarity, 4),
+        "contamination_hits": contamination_hits(markdown),
+        "incomplete_sentences": incomplete,
+        "fixed_filler_heading_count": fixed_heading_count,
+    }
 
 
 def _article_body_for_fact_scan(markdown: str) -> str:
@@ -375,7 +498,8 @@ def analyze_article(article: dict[str, Any], research_bundle: dict[str, Any] | N
         1,
     ))
     unique_basis_count = int(trace.get("total_count") or 0)
-    return {"word_count": actual_word_count, "target_word_count": target_word_count, "length_ratio": round(length_ratio, 4), "verified_fact_count": int(trace.get("validated_count") or 0), "fact_basis_count": unique_basis_count, "invalid_fact_count": max(0, unique_basis_count - int(trace.get("validated_count") or 0)), "cross_verified_fact_count": int(trace.get("cross_verified_count") or 0), "source_count": source_count, "publisher_count": source_count, "time_count": time_count, "entity_count": entity_count, "number_count": number_count, "repetition_score": round(repetition_ratio, 4), "vague_sentence_ratio": round(vague_ratio, 4), "source_coverage": round(source_coverage, 4), "sentence_count": len(sentences), "information_sufficiency_score": float(score), "fact_trace": trace}
+    intra = intra_article_quality(article)
+    return {"word_count": actual_word_count, "target_word_count": target_word_count, "length_ratio": round(length_ratio, 4), "verified_fact_count": int(trace.get("validated_count") or 0), "fact_basis_count": unique_basis_count, "invalid_fact_count": max(0, unique_basis_count - int(trace.get("validated_count") or 0)), "cross_verified_fact_count": int(trace.get("cross_verified_count") or 0), "source_count": source_count, "publisher_count": source_count, "time_count": time_count, "entity_count": entity_count, "number_count": number_count, "repetition_score": round(repetition_ratio, 4), "vague_sentence_ratio": round(vague_ratio, 4), "source_coverage": round(source_coverage, 4), "sentence_count": len(sentences), "information_sufficiency_score": float(score), "fact_trace": trace, "intra_article_quality": intra}
 
 
 def _cleanup_claim_text(text: str, claims: list[str]) -> str:
@@ -493,9 +617,15 @@ def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None
     limited_research_mode = bool(bundle.get("hotlist_metadata_available") and str(bundle.get("research_status") or "") == "hotlist_limited")
     custom_topic_mode = bool(bundle.get("custom_topic") and str(bundle.get("research_status") or "") == "custom_topic")
     trace = metrics.get("fact_trace") or {}
+    intra = metrics.get("intra_article_quality") or intra_article_quality(article)
 
     if not markdown.strip():
         hard_reasons.append("正文内容为空")
+    if article.get("used_local_fallback") or article.get("fallback_kind"):
+        hard_reasons.append("ARTICLE_TEXT_RETRY_REQUIRED")
+    if not intra.get("passed", True):
+        for code in intra.get("failures") or []:
+            hard_reasons.append("SOURCE_CONTENT_CONTAMINATED" if code == "SOURCE_CONTENT_CONTAMINATED" else f"ARTICLE_QUALITY_BLOCKED:{code}")
     if accepted_source_count <= 0:
         if limited_research_mode:
             warning_reasons.append("当前仅获取到热榜标题和有限元数据，发布前请补充核对权威来源。")
