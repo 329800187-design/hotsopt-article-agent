@@ -21,6 +21,14 @@ ORG_SUFFIXES = ("公司", "集团", "政府", "市政府", "委员会", "学校"
 PERSON_SUFFIXES = ("先生", "女士", "市长", "部长", "局长", "总统", "议员")
 OFFICIAL_DOMAIN_WHITELIST = {"mfa.gov.cn", "gov.cn", "gov", "gov.tw", "gov.hk"}
 PAGE_NOISE_RE = re.compile(r"相关推荐|热门推荐|版权声明|作者声明|导航菜单|评论区|其他视频标题|页面底部新闻列表|推荐阅读|猜你喜欢|广告")
+SOURCE_TEMPLATE_NOISE_RE = re.compile(
+    r"\{\{[^{}]{0,200}\}\}|"
+    r"\b(?:dynamicData|subjectData|item\.reporter_name|item\.tag|reporter_name)\b|"
+    r"未发布文章|文章未发布|仅支持\s*15\s*分钟预览|后台刷新重置预览|"
+    r"打开[\u4e00-\u9fffA-Za-z0-9]{0,12}新闻|阅读体验更佳|更多内容请打开|"
+    r"打开客户端|下载客户端|下载\s*APP|APP内打开|广告|相关推荐|推荐阅读|热门推荐|猜你喜欢|"
+    r"导航|返回首页|版权声明|用户协议|隐私政策|登录|注册"
+)
 FACT_ACTION_MARKERS = (
     " announced ",
     " said ",
@@ -57,11 +65,60 @@ def canonical_url(url: str) -> str:
 
 
 def _normalize_text(value: str) -> str:
-    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value or "")).lower()
+    text = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(value or "")).lower()
+    if text:
+        return text
+    fallback = re.sub(r"[\W_]+", "", str(value or ""), flags=re.UNICODE).lower()
+    return fallback or re.sub(r"\s+", "", str(value or "")).lower()
 
 
 def _content_fingerprint(value: str) -> str:
     return hashlib.sha256(_normalize_text(value)[:12000].encode("utf-8")).hexdigest()
+
+
+def clean_source_text(text: str) -> dict[str, Any]:
+    """Remove page/template noise before source text reaches fact cards or prompts."""
+    original = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    original_paragraphs = [item.strip() for item in re.split(r"\n+|(?<=[。！？；])\s+", original) if item.strip()]
+    removed_noise_count = 0
+    duplicate_block_count = 0
+    cleaned_paragraphs: list[str] = []
+    seen: set[str] = set()
+    for raw in original_paragraphs:
+        paragraph = re.sub(r"\s+", " ", raw).strip()
+        if not paragraph:
+            continue
+        before = paragraph
+        paragraph, variable_hits = re.subn(r"\{\{[^{}]{0,200}\}\}", "", paragraph)
+        removed_noise_count += variable_hits
+        if SOURCE_TEMPLATE_NOISE_RE.search(before) or PAGE_NOISE_RE.search(before) or BOILERPLATE_RE.search(before):
+            removed_noise_count += 1
+            continue
+        paragraph = paragraph.strip(" ，,:：")
+        normalized = _normalize_text(paragraph)
+        if len(paragraph) < 12 or not normalized:
+            continue
+        if normalized in seen:
+            duplicate_block_count += 1
+            continue
+        seen.add(normalized)
+        cleaned_paragraphs.append(paragraph)
+    cleaned = "\n".join(cleaned_paragraphs)
+    contaminated = bool(SOURCE_TEMPLATE_NOISE_RE.search(original))
+    insufficient = len(_normalize_text(cleaned)) < 12
+    return {
+        "text": cleaned,
+        "metrics": {
+            "original_chars": len(original),
+            "cleaned_chars": len(cleaned),
+            "original_paragraphs": len(original_paragraphs),
+            "cleaned_paragraphs": len(cleaned_paragraphs),
+            "removed_noise_count": removed_noise_count,
+            "duplicate_block_count": duplicate_block_count,
+            "contamination_detected": contaminated,
+            "source_quality_insufficient": insufficient,
+        },
+    }
 
 
 def is_official_source(source: dict[str, Any]) -> bool:
@@ -205,7 +262,10 @@ def extract_page_content(html: str, url: str, *, fetched_at: str | None = None) 
     else:
         paragraphs = _clean_paragraphs(parser.parts)
         content_source = "html_article_or_main"
-    content = "\n".join(paragraphs[:160])
+    raw_content = "\n".join(paragraphs[:160])
+    cleaned = clean_source_text(raw_content)
+    content = str(cleaned.get("text") or "")
+    audit = dict(cleaned.get("metrics") or {})
     parsed = urlparse(url)
     title = jsonld.get("title") or parser.title or parser.meta.get("og:title") or parser.meta.get("twitter:title") or url
     published = jsonld.get("published_at") or parser.meta.get("article:published_time") or parser.meta.get("datepublished") or parser.meta.get("date") or ""
@@ -213,7 +273,16 @@ def extract_page_content(html: str, url: str, *, fetched_at: str | None = None) 
         "title": title.strip(), "url": url, "canonical_url": canonical_url(url), "domain": parsed.netloc.lower(),
         "publisher_id": registrable_domain(parsed.netloc), "published_at": published, "fetched_at": fetched_at or _now(),
         "summary": content[:1800], "content": content, "content_hash": _content_fingerprint(content),
-        "content_source": content_source, "fetch_success": len(content) >= 20, "source_level": "source_page",
+        "content_source": content_source, "fetch_success": len(content) >= 20 and not audit.get("source_quality_insufficient"), "source_level": "source_page",
+        "source_cleaning": audit,
+        "original_chars": audit.get("original_chars", len(raw_content)),
+        "cleaned_chars": audit.get("cleaned_chars", len(content)),
+        "original_paragraphs": audit.get("original_paragraphs", len(paragraphs)),
+        "cleaned_paragraphs": audit.get("cleaned_paragraphs", len(paragraphs)),
+        "removed_noise_count": audit.get("removed_noise_count", 0),
+        "duplicate_block_count": audit.get("duplicate_block_count", 0),
+        "source_quality_insufficient": audit.get("source_quality_insufficient", False),
+        "source_contamination_detected": audit.get("contamination_detected", False),
     }
 
 
@@ -499,7 +568,7 @@ class ResearchService:
             fingerprint = str(source.get("content_hash") or _content_fingerprint(str(source.get("content") or source.get("summary") or "")))
             duplicate_id = by_url.get(source["canonical_url"]) or by_hash.get(fingerprint)
             if not duplicate_id:
-                same_story = next((item for item in result if item.get("fetch_success") and _similar_text(str(item.get("title")), str(source.get("title"))) >= 0.86 and _similar_text(str(item.get("content") or item.get("summary")), str(source.get("content") or source.get("summary"))) >= (0.78 if str(item.get("publisher_id")) == str(source.get("publisher_id")) else 0.96)), None)
+                same_story = next((item for item in result if item.get("fetch_success") and _similar_text(str(item.get("title")), str(source.get("title"))) >= 0.86 and _similar_text(str(item.get("content") or item.get("summary")), str(source.get("content") or source.get("summary"))) >= 0.96), None)
                 duplicate_id = str((same_story or {}).get("source_id") or "")
             if duplicate_id:
                 source["duplicate_of"] = duplicate_id
@@ -623,6 +692,36 @@ class ResearchService:
                 single_source.append(record)
         return verified[:80], single_source[:80], candidates[:160]
 
+    @staticmethod
+    def _clean_source_record(source: dict[str, Any]) -> dict[str, Any]:
+        content = str(source.get("content") or source.get("summary") or "")
+        result = dict(source)
+        if isinstance(source.get("source_cleaning"), dict):
+            metrics = dict(source.get("source_cleaning") or {})
+            cleaned_text = content
+        else:
+            cleaned = clean_source_text(content)
+            cleaned_text = str(cleaned.get("text") or "")
+            metrics = dict(cleaned.get("metrics") or {})
+        result["raw_source_chars"] = metrics.get("original_chars", len(content))
+        result["source_cleaning"] = metrics
+        result["original_chars"] = metrics.get("original_chars", len(content))
+        result["cleaned_chars"] = metrics.get("cleaned_chars", len(cleaned_text))
+        result["original_paragraphs"] = metrics.get("original_paragraphs", 0)
+        result["cleaned_paragraphs"] = metrics.get("cleaned_paragraphs", 0)
+        result["removed_noise_count"] = metrics.get("removed_noise_count", 0)
+        result["duplicate_block_count"] = metrics.get("duplicate_block_count", 0)
+        result["source_contamination_detected"] = bool(metrics.get("contamination_detected"))
+        result["source_quality_insufficient"] = bool(metrics.get("source_quality_insufficient"))
+        result["content"] = cleaned_text
+        result["summary"] = cleaned_text[:1800]
+        result["content_hash"] = _content_fingerprint(cleaned_text)
+        if result["source_quality_insufficient"]:
+            result["fetch_success"] = False
+            result["accepted_for_research"] = False
+            result["rejection_reason"] = "source_quality_insufficient"
+        return result
+
     def collect(self, topic: Any, references: Iterable[str] | None = None, supplemental_text: str = "") -> dict[str, Any]:
         deadline = time.monotonic() + 60
         self.discovery_evidence = []
@@ -657,6 +756,7 @@ class ResearchService:
             source.setdefault("publisher_id", registrable_domain(str(source.get("domain") or urlparse(url).netloc)))
             source.setdefault("source_level", "source_page")
             source.setdefault("fetch_success", False)
+            source = self._clean_source_record(source)
             if is_official_source(source):
                 source["source_level"] = "official"
             source.update(score_source_relevance(topic, source))
@@ -667,7 +767,9 @@ class ResearchService:
             if len(accepted_so_far) >= 3 or (official_so_far and media_so_far):
                 break
         if supplemental_text.strip():
-            source = {"source_id": _source_id("supplemental", len(raw_sources) + 1), "source_name": "用户补充资料", "title": "用户粘贴资料", "url": "", "published_at": "", "fetched_at": _now(), "summary": supplemental_text.strip()[:1800], "content": supplemental_text.strip(), "source_level": "user_reference", "fetch_success": True, "domain": "user", "publisher_id": "user"}
+            cleaned = clean_source_text(supplemental_text.strip())
+            source = {"source_id": _source_id("supplemental", len(raw_sources) + 1), "source_name": "用户补充资料", "title": "用户粘贴资料", "url": "", "published_at": "", "fetched_at": _now(), "summary": str(cleaned.get("text") or "")[:1800], "content": str(cleaned.get("text") or ""), "source_level": "user_reference", "fetch_success": bool(str(cleaned.get("text") or "").strip()), "domain": "user", "publisher_id": "user", "source_cleaning": cleaned.get("metrics") or {}}
+            source = self._clean_source_record(source)
             source.update(score_source_relevance(topic, source))
             raw_sources.append(source)
         
@@ -733,6 +835,7 @@ class ResearchService:
                         source.setdefault("source_level", "source_page")
                         source.setdefault("fetch_success", False)
                         source["supplemental_search"] = True
+                        source = self._clean_source_record(source)
                         source.update(score_source_relevance(topic, source))
                         raw_sources.append(source)
                         if source.get("fetch_success") and source.get("accepted_for_research"):
@@ -760,6 +863,15 @@ class ResearchService:
         official_fact_count = sum(1 for fact in facts if fact.get("verification_type") == "official_single_source")
         reliable_source_count = len([source for source in accepted_sources if is_official_source(source) or str(source.get("source_level") or "") in {"official", "source_page"}])
         usable_fact_count = len(usable_facts)
+        source_cleaning_summary = {
+            "raw_source_count": len(raw_sources),
+            "cleaned_source_count": len([source for source in sources if int(source.get("cleaned_chars") or 0) > 0]),
+            "accepted_cleaned_source_count": len(accepted_sources),
+            "contaminated_source_count": len([source for source in sources if source.get("source_contamination_detected")]),
+            "insufficient_source_count": len([source for source in sources if source.get("source_quality_insufficient")]),
+            "removed_noise_count": sum(int(source.get("removed_noise_count") or 0) for source in sources),
+            "duplicate_block_count": sum(int(source.get("duplicate_block_count") or 0) for source in sources),
+        }
         research_fact_cards = _fact_cards(usable_facts, accepted_sources)
         background_fact_cards = _fact_cards(
             [f for f in usable_facts if _is_background_fact(f.get("canonical_fact", "") or f.get("fact", ""))],
@@ -799,6 +911,7 @@ class ResearchService:
             "discovery_evidence": discovery, "candidate_link_count": total_candidates, "accepted_source_count": len(accepted_sources),
             "rejected_source_count": total_rejected, "search_failure_visible_to_user": any(str(item.get("error_code") or "") for item in discovery),
             "research_status": status, "information_sufficiency_score": score, "insufficient_reasons": insufficient_reasons,
+            "source_cleaning_summary": source_cleaning_summary,
             "minimum_gate": {"condition_a": condition_a, "condition_b": condition_b, "has_event_context": has_event_context, "has_conflict": has_conflict},
             "collected_at": _now(),
         }
