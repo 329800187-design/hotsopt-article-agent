@@ -264,8 +264,8 @@ def test_WORD_INCLUDES_SOURCE_AND_OMITS_AI_SECTIONS_PASS(tmp_path: Path):
     paragraphs = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
     all_text = "\n".join(paragraphs)
     assert paragraphs[0] == "Word 导出测试"
-    assert "资料来源" in paragraphs
-    assert "原文链接：" in all_text
+    assert "资料来源" not in paragraphs
+    assert "原文链接" not in all_text
     assert "AI辅助声明" not in all_text
 
 

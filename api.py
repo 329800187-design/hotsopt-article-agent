@@ -6,6 +6,7 @@ import tempfile
 import os
 import base64
 import hmac
+import json
 import shutil
 import time
 from contextlib import asynccontextmanager, nullcontext
@@ -20,6 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from hot_sources.service import HotTrendService
 from hot_sources.classifier import CATEGORIES
+from hot_sources.commercial_filter import blocked_topic_reason
 from modules.config_store import load_settings
 from modules.app_paths import data_root, exports_root, model_test_root, research_root, tasks_root
 
@@ -50,6 +52,7 @@ from generation.inline_images import get_inline_images
 from generation.selected_images import generate_selected_images
 from generation.editor import discard_article_draft, get_article, restore_article_version, save_article, save_article_draft
 from export.docx_exporter import ARTICLE_NOT_READY_MESSAGE, export_article
+from export.customer_output import customer_visible_article, ensure_no_customer_meta_content
 from export.zip_exporter import export_article_bundle, export_batch_bundle, safe_filename
 from export.layout_pipeline import ensure_article_layout, prepare_article_layout
 from generation.recovery import recover_interrupted_tasks
@@ -259,6 +262,47 @@ def _license_gate(feature: str | None = None) -> JSONResponse | None:
 
 def _edition_block(detail: str = "当前交付版本每次只能创作1个热点、1篇文章。") -> JSONResponse:
     return _error("FEATURE_NOT_AVAILABLE_IN_CURRENT_EDITION", detail, detail, retryable=False, status_code=403)
+
+
+COMMERCIAL_TOPIC_ERROR_CODE = "TOPIC-COMMERCIAL-FILTERED"
+COMMERCIAL_TOPIC_ERROR_MESSAGE = "\u8be5\u5185\u5bb9\u5c5e\u4e8e\u5546\u54c1\u63a8\u5e7f\u3001\u7535\u5546\u6216\u62db\u8058\u4fe1\u606f\uff0c\u4e0d\u9002\u5408\u4f5c\u4e3a\u666e\u901a\u70ed\u70b9\u6587\u7ae0\u751f\u6210\u3002\u8bf7\u9009\u62e9\u5176\u4ed6\u70ed\u70b9\u3002"
+
+
+def _commercial_topic_payload(details: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {"code": COMMERCIAL_TOPIC_ERROR_CODE, "message": COMMERCIAL_TOPIC_ERROR_MESSAGE, "details": details or {}}
+
+
+def _commercial_topic_error(details: dict[str, Any] | None = None) -> JSONResponse:
+    payload = _commercial_topic_payload(details)
+    return _error(COMMERCIAL_TOPIC_ERROR_CODE, COMMERCIAL_TOPIC_ERROR_MESSAGE, payload, retryable=False, status_code=409)
+
+
+def _commercial_details_from_value_error(exc: ValueError) -> dict[str, Any] | None:
+    text = str(exc)
+    prefix = COMMERCIAL_TOPIC_ERROR_CODE + ":"
+    if not text.startswith(prefix):
+        return None
+    raw = text[len(prefix):].strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {"raw": parsed}
+    except json.JSONDecodeError:
+        return {"raw": raw}
+
+
+def _blocked_topic_details(topic: dict[str, Any]) -> dict[str, Any] | None:
+    reason = blocked_topic_reason(topic)
+    if not reason:
+        return None
+    return {
+        "hotspot_id": topic.get("id") or topic.get("hotspot_id"),
+        "title": topic.get("title"),
+        "commercial_score": reason.get("commercial_score", 0),
+        "matched_signals": reason.get("matched_signals", []),
+        "filter_reason": reason.get("filter_reason") or reason.get("hotspot_class"),
+    }
 
 
 @app.get("/api/license/status")
@@ -567,6 +611,11 @@ def select_topics(payload: SelectTopicsRequest) -> JSONResponse:
     try:
         topics = service.select_topics(payload.topic_ids)
         return _response(True, {"items": [topic.to_dict() for topic in topics], "count": len(topics)})
+    except ValueError as exc:
+        commercial_details = _commercial_details_from_value_error(exc)
+        if commercial_details is not None:
+            return _commercial_topic_error(commercial_details)
+        return _error("TOPIC_SELECTION_FAILED", "话题选择失败", str(exc))
     except Exception as exc:
         return _error("TOPIC_SELECTION_FAILED", "话题选择失败", str(exc))
 
@@ -582,10 +631,14 @@ def add_basket(payload: BasketRequest) -> JSONResponse:
         items = service.add_to_basket(payload.topic_ids)
         return _response(True, {"items": items, "count": len(items)})
     except ValueError as exc:
+        commercial_details = _commercial_details_from_value_error(exc)
+        if commercial_details is not None:
+            return _commercial_topic_error(commercial_details)
         code = str(exc) if str(exc).startswith("TOPIC-") else "TOPIC-SELECT-STATE"
         message = {
             "TOPIC-SELECT-DUPLICATE": "这个热点已经在选题篮里了。",
             "TOPIC-SELECT-LIMIT": "选题篮最多只能选择 5 个热点。",
+            COMMERCIAL_TOPIC_ERROR_CODE: COMMERCIAL_TOPIC_ERROR_MESSAGE,
             "TOPIC-SELECT-STATE": "选题篮状态异常，请刷新后再试。",
         }.get(code, "选题篮状态异常，请刷新后再试。")
         return _error(code, message, str(exc), retryable=False, status_code=409)
@@ -630,6 +683,11 @@ def create_task(payload: CreateTaskRequest) -> JSONResponse:
     try:
         task = service.create_task(payload.task_name, payload.mode, payload.topic_ids, payload.article_count, payload.generation_options.model_dump(exclude_none=True))
         return _response(True, task, None, 201)
+    except ValueError as exc:
+        commercial_details = _commercial_details_from_value_error(exc)
+        if commercial_details is not None:
+            return _commercial_topic_error(commercial_details)
+        return _error("TASK_CREATE_FAILED", "生成任务创建失败", str(exc))
     except Exception as exc:
         return _error("TASK_CREATE_FAILED", "生成任务创建失败", str(exc))
 
@@ -1071,6 +1129,10 @@ def _ensure_state_article_ready_for_export(state: dict[str, Any] | None) -> dict
     article = state.get("article")
     if not isinstance(article, dict):
         raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
+    try:
+        ensure_no_customer_meta_content(article)
+    except ValueError as exc:
+        raise ProviderError("ARTICLE_META_CONTENT_LEAK", str(exc)) from exc
     title = str(article.get("title") or "").strip()
     body_markdown = _article_body_markdown_for_export(article)
     body_char_count = int(article.get("body_char_count") or count_body_chinese_chars(article) or 0)
@@ -1095,7 +1157,7 @@ def _article_export(task_id: str, kind: str) -> FileResponse:
     if not task:
         raise ProviderError("TASK_NOT_FOUND", "task not found")
     state = load_generation_task(task_id)
-    article = prepare_article_layout(_ensure_state_article_ready_for_export(state))
+    article = customer_visible_article(prepare_article_layout(_ensure_state_article_ready_for_export(state)))
     if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
         raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
         raise ProviderError("ARTICLE_NOT_FINAL", "内容仍在进行差异检查或自动优化，完成后即可导出。")
@@ -1114,7 +1176,7 @@ def _article_export(task_id: str, kind: str) -> FileResponse:
 
 def _exportable_state_article(task_id: str, *, absolute_image_paths: bool = False) -> tuple[dict[str, Any], Path]:
     state = load_generation_task(task_id) if task_id else None
-    article = prepare_article_layout(_ensure_state_article_ready_for_export(state))
+    article = customer_visible_article(prepare_article_layout(_ensure_state_article_ready_for_export(state)))
     if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
         raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "article layout and product check must pass before export")
     root = generation_task_dir(task_id)
@@ -1129,7 +1191,7 @@ def export_task_word(task_id: str):
     try:
         return _article_export(task_id, "word")
     except ProviderError as exc:
-        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED", "ARTICLE_NOT_READY"} else 400)
+        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED", "ARTICLE_NOT_READY", "ARTICLE_META_CONTENT_LEAK"} else 400)
     except Exception as exc:
         return _error("WORD_EXPORT_FAILED", "Word 导出失败", str(exc), retryable=True, status_code=400)
 
@@ -1139,7 +1201,7 @@ def export_task_zip(task_id: str):
     try:
         return _article_export(task_id, "zip")
     except ProviderError as exc:
-        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED", "ARTICLE_NOT_READY"} else 400)
+        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED", "ARTICLE_NOT_READY", "ARTICLE_META_CONTENT_LEAK"} else 400)
     except Exception as exc:
         return _error("ZIP_EXPORT_FAILED", "ZIP 导出失败", str(exc), retryable=True, status_code=400)
 
@@ -1168,7 +1230,7 @@ def export_batch_zip(batch_id: str):
         export_batch_bundle(articles, path, str(batch.get("batch_name") or "本次创作"))
         return FileResponse(path, media_type="application/zip", filename=f"{safe_filename(str(batch.get('batch_name') or '本次创作'))}.zip")
     except ProviderError as exc:
-        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"BATCH_NOT_FINAL", "ARTICLE_NOT_READY"} else 400)
+        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"BATCH_NOT_FINAL", "ARTICLE_NOT_READY", "ARTICLE_META_CONTENT_LEAK"} else 400)
     except Exception as exc:
         return _error("ZIP_EXPORT_FAILED", "ZIP 导出失败", str(exc), retryable=True, status_code=400)
 
@@ -1199,7 +1261,7 @@ def export_batch_word(batch_id: str):
         export_combined(articles, path)
         return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=f"{safe_filename(str(batch.get('batch_name') or '本次创作'))}.docx")
     except ProviderError as exc:
-        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"BATCH_NOT_FINAL", "ARTICLE_NOT_READY"} else 400)
+        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"BATCH_NOT_FINAL", "ARTICLE_NOT_READY", "ARTICLE_META_CONTENT_LEAK"} else 400)
     except Exception as exc:
         return _error("WORD_EXPORT_FAILED", "Word 导出失败", str(exc), retryable=True, status_code=400)
 
@@ -1282,6 +1344,11 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
             topics = [topic.to_dict() for topic in service.select_topics(payload.topic_ids)]
         elif payload.topics:
             topics = sanitize_sensitive_data(payload.topics)
+            for topic in topics:
+                if isinstance(topic, dict):
+                    blocked_details = _blocked_topic_details(topic)
+                    if blocked_details is not None:
+                        return _commercial_topic_error(blocked_details)
         else:
             raise ValueError("batch requires 1 to 5 topics")
         confirmed_paid = bool(payload.generation_options.confirm_paid)
@@ -1312,6 +1379,11 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
         if client_req_id:
             _BATCH_DEDUP_STORE[client_req_id] = {**batch, "_ts": time.time()}
         return _response(True, batch, None, 201)
+    except ValueError as exc:
+        commercial_details = _commercial_details_from_value_error(exc)
+        if commercial_details is not None:
+            return _commercial_topic_error(commercial_details)
+        return _batch_error_response(exc)
     except Exception as exc:
         return _batch_error_response(exc)
 

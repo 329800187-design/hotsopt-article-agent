@@ -130,7 +130,8 @@ def _run_model_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: str 
 def test_08_local_fallback_not_completed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     result = _run_model_error(tmp_path, monkeypatch)
     assert result["status"] == "failed"
-    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+    assert result["error_code"] == "MODEL_OUTPUT_EMPTY"
+    assert "ARTICLE_TEXT_RETRY_REQUIRED" in result["quality_gate"]["reasons"]
     assert result["article"] is None
 
 
@@ -167,7 +168,7 @@ def test_13_raw_source_fields_are_not_exported(tmp_path: Path):
     path = export_article(article, tmp_path / "article.docx")
     text = "\n".join(paragraph.text for paragraph in Document(path).paragraphs)
     assert "RAW_SOURCE_SECRET_SHOULD_NOT_EXPORT" not in text
-    assert "https://example.com/news" in text
+    assert "https://example.com/news" not in text
 
 
 def test_14_insufficient_info_repeated_to_length_is_blocked():

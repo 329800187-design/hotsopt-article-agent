@@ -17,6 +17,7 @@ import httpx
 import streamlit as st
 
 from generation.angle_planner import available_angles, plan_angles
+from export.customer_output import customer_visible_article
 from modules.generation_store import generation_task_dir, load_generation_task
 from modules.config_store import load_settings
 from modules.app_paths import data_root, exports_root
@@ -1160,13 +1161,13 @@ def _render_standalone_tasks(tasks: list[dict[str, Any]], restricted: bool) -> N
             _render_text_generation_status({**state, "status": state.get("status") or status}, task_id, restricted)
             if status == "failed":
                 _render_failed_task_panel("", task_id, state, restricted)
-            article = state.get("article") or {}
+            article = customer_visible_article(state.get("article") or {}) if state.get("article") else {}
             if article:
                 st.markdown(f"### {article.get('title') or '文章'}")
-                intro = article.get("lead") or article.get("intro") or article.get("summary")
+                intro = article.get("lead")
                 if intro:
                     st.markdown(str(intro))
-                body_markdown = str(article.get("body_markdown") or article.get("content_markdown") or "").strip()
+                body_markdown = str(article.get("body_markdown") or "").strip()
                 if not body_markdown and article.get("sections"):
                     parts: list[str] = []
                     for section in article.get("sections") or []:
@@ -1191,15 +1192,15 @@ def _render_standalone_tasks(tasks: list[dict[str, Any]], restricted: bool) -> N
 
 def _content(restricted: bool = False) -> None:
     page_header("03 / 结果", "我的内容", "文章、封面、正文图片和历史版本都保存在本机")
+    batch_payload: dict[str, Any] = {"items": [], "count": 0, "item_errors": []}
     with st.spinner("正在加载内容列表…"):
         try:
-            batch_payload = _api("GET", "/batches?limit=20", timeout=10)
+            batch_payload = _api("GET", "/batches?limit=20&refresh=false", timeout=6)
         except Exception as exc:
             _log_error("CONTENT-LIST-001", exc, page="我的内容", action="load_batches")
-            st.error(f"内容暂时无法读取：{_api_error_text(exc) or '服务响应异常'}")
+            st.warning(f"批次列表暂时无法读取：{_api_error_text(exc) or '服务响应异常'}")
             if st.button("重新加载", key="rc1_content_retry"):
                 st.rerun()
-            return
     batches = batch_payload.get("items", [])
     item_errors = batch_payload.get("item_errors") or []
     if item_errors:
@@ -1311,11 +1312,11 @@ def _content(restricted: bool = False) -> None:
                     plan = state.get("image_plan") or {}
                     if plan:
                         st.caption(f"图片方案：{plan.get('label') or plan.get('mode')} · 预计调用 {plan.get('max_calls', 0)} 次 · 已调用 {usage.get('generation_calls', 0)} 次 · 最大重试 {plan.get('retry_limit', 0)} 次")
-                    article = state.get("article") or {}
+                    article = customer_visible_article(state.get("article") or {}) if state.get("article") else {}
                     if article:
                         st.markdown(f"### {article.get('title') or '文章'}")
-                        if article.get("lead") or article.get("intro") or article.get("summary"):
-                            st.markdown(str(article.get("lead") or article.get("intro") or article.get("summary") or ""))
+                        if article.get("lead"):
+                            st.markdown(str(article.get("lead") or ""))
                         body_markdown = str(article.get("body_markdown") or "").strip()
                         if not body_markdown and article.get("sections"):
                             body_parts: list[str] = []
@@ -1328,9 +1329,9 @@ def _content(restricted: bool = False) -> None:
                                     body_parts.append(f"## {heading}\n{body}".strip() if heading else body)
                             body_markdown = "\n\n".join(body_parts).strip()
                         with st.expander("查看全文"):
-                            st.markdown(body_markdown or article.get("content_markdown") or "")
+                            st.markdown(body_markdown or "")
                         exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
-                        layout_ok = (article.get("layout_check") or {}).get("passed", bool(article.get("content_markdown")))
+                        layout_ok = (article.get("layout_check") or {}).get("passed", bool(body_markdown))
                         if state.get("status") in exportable_statuses and gate.get("status") != "failed" and layout_ok:
                             _download(f"/tasks/{task_id}/export/word", f"{article.get('title') or '文章'}.docx", "导出 Word", f"rc1_word_{task_id}")
                             _download(f"/tasks/{task_id}/export/zip", f"{article.get('title') or '文章'}.zip", "导出单篇 ZIP", f"rc1_zip_{task_id}")

@@ -152,7 +152,8 @@ def test_MANUAL_TOPIC_TIMEOUT_REQUIRES_TEXT_RETRY(tmp_path: Path, monkeypatch):
     topic = _manual_topic("r1-2-manual-timeout")
     result = _run(tmp_path, monkeypatch, topic, lambda *args, **kwargs: (_ for _ in ()).throw(ProviderError("TIMEOUT", "model timeout")))
     assert result["status"] == "failed"
-    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+    assert result["error_code"] == "TIMEOUT"
+    assert "ARTICLE_TEXT_RETRY_REQUIRED" in result["quality_gate"]["reasons"]
     assert result["provider_error_code"] == "TIMEOUT"
     assert result["retryable"] is True
     assert result["article"] is None
@@ -162,7 +163,8 @@ def test_HOTLIST_ZERO_SOURCE_TIMEOUT_REQUIRES_TEXT_RETRY(tmp_path: Path, monkeyp
     topic = _hotlist_topic()
     result = _run(tmp_path, monkeypatch, topic, lambda *args, **kwargs: (_ for _ in ()).throw(ProviderError("TIMEOUT", "model timeout")))
     assert result["status"] == "failed"
-    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+    assert result["error_code"] == "TIMEOUT"
+    assert "ARTICLE_TEXT_RETRY_REQUIRED" in result["quality_gate"]["reasons"]
     assert result["research_bundle"]["research_status"] == "hotlist_limited"
     assert result["article"] is None
 
@@ -184,7 +186,7 @@ def test_DESKTOP_DOWNLOADS_AND_WORD_ZIP_EXPORT_GATES(tmp_path: Path):
     with zipfile.ZipFile(zip_path) as archive:
         names = archive.namelist()
         assert any(name.endswith(".docx") for name in names)
-        assert any(name.endswith(".txt") for name in names)
+        assert not any(name.endswith(".txt") for name in names)
 
 
 def test_TEXT_KEY_LOAD_FAILED_WHEN_SAVED_KEY_FLAG_BUT_EMPTY_SECRET(tmp_path: Path, monkeypatch):

@@ -298,7 +298,8 @@ def test_INVALID_JSON_NOT_TASK_FAILURE_PASS(monkeypatch: pytest.MonkeyPatch, tmp
 def test_EMPTY_RESPONSE_LOCAL_DRAFT_PASS(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     result = _run_single_task(monkeypatch, tmp_path, "   ")
     assert result["status"] == "failed"
-    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+    assert result["error_code"] == "ARTICLE_PARSE_ERROR"
+    assert "ARTICLE_TEXT_RETRY_REQUIRED" in result["quality_gate"]["reasons"]
     assert result["quality_gate"]["status"] == "failed"
     assert result["article"] is None
-    assert "公开资料已保存" in result["fallback_notice"]
+    assert "ARTICLE_PARSE_ERROR" in result["fallback_notice"]

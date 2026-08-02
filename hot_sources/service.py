@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 import time
 from typing import Any
 
 import httpx
 
 from hot_sources.cache import LocalCacheProvider
+from hot_sources.commercial_filter import blocked_topic_reason, filter_public_hotspots
 from hot_sources.dedupe import deduplicate_topics
 from hot_sources.manual import ManualHotSource
 from hot_sources.newsnow import NewsNowSource
@@ -56,6 +58,19 @@ class HotTrendService:
     @staticmethod
     def _safe_topics(topics: list[HotTopic]) -> list[HotTopic]:
         return [HotTopic.from_dict(sanitize_sensitive_data(topic.to_dict())) for topic in topics]
+
+    @staticmethod
+    def _filter_stats(raw_count: int, deduped_count: int, valid_count: int, filtered: list[dict[str, Any]], duplicate_count: int = 0, invalid_count: int = 0) -> dict[str, Any]:
+        return {
+            "raw_count": raw_count,
+            "valid_hotspot_count": valid_count,
+            "filtered_commercial_count": len(filtered),
+            "filtered_duplicate_count": duplicate_count,
+            "filtered_invalid_count": invalid_count,
+            "final_display_count": valid_count,
+            "deduplicated_count": deduped_count,
+            "filtered_commercial_examples": filtered[:20],
+        }
 
     @staticmethod
     def _hotlist_evidence(topics: list[HotTopic], *, provider_name: str, status: str, captured_at: str, cache_age_seconds: float | None = None) -> dict[str, Any]:
@@ -146,7 +161,9 @@ class HotTrendService:
                 })
         if merged_topics:
             pre_dedupe_total = len(merged_topics)
-            topics = deduplicate_topics(merged_topics)[:200]
+            deduped_topics = deduplicate_topics(merged_topics)
+            topics, filtered_commercial = filter_public_hotspots(deduped_topics)
+            topics = topics[:200]
             captured_at = max((topic.captured_at for topic in topics if topic.captured_at), default=utc_now())
             primary_name, primary_display, _ = successful_providers[0]
             display_name = " + ".join(dict.fromkeys(display for _, display, _ in successful_providers))
@@ -156,6 +173,8 @@ class HotTrendService:
             evidence = self._hotlist_evidence(safe_topics, provider_name=primary_name, status="online", captured_at=captured_at)
             evidence["provider_names"] = [name for name, _, _ in successful_providers]
             evidence["provider_count"] = len(successful_providers)
+            filter_stats = self._filter_stats(pre_dedupe_total, len(deduped_topics), len(safe_topics), filtered_commercial, duplicate_count=max(0, pre_dedupe_total - len(deduped_topics)))
+            evidence["filter_stats"] = filter_stats
             return {
                 "topics": safe_topics,
                 "provider_name": primary_name,
@@ -168,6 +187,7 @@ class HotTrendService:
                 "last_error": "",
                 "hotlist_evidence": evidence,
                 "provider_diagnostics": provider_diagnostics,
+                "filter_stats": filter_stats,
                 "pre_dedupe_live_topics": pre_dedupe_total,
                 "deduplicated_live_topics": len(safe_topics),
                 "topics_with_url_or_identifier": sum(bool(item.source_url or item.source) for item in safe_topics),
@@ -176,7 +196,9 @@ class HotTrendService:
                 "elapsed_ms": int((time.perf_counter() - refresh_started) * 1000),
             }
         try:
-            topics = deduplicate_topics(self.cache_provider.fetch_trends())
+            cached_raw = self.cache_provider.fetch_trends()
+            deduped_cached = deduplicate_topics(cached_raw)
+            topics, filtered_commercial = filter_public_hotspots(deduped_cached)
             self.store.save_topics(topics, record_observation=False)
             safe_topics = self._safe_topics(topics)
             age = self.cache_age_seconds()
@@ -184,7 +206,10 @@ class HotTrendService:
             warning = "本地缓存已过期" if stale else ""
             self.store.save_provider_status(self.cache_provider.provider_name, self.cache_provider.display_name, "online" if not stale else "stale", self.cache_provider.last_success_at, warning)
             captured_at = safe_topics[0].captured_at if safe_topics else utc_now()
-            return {"topics": safe_topics, "provider_name": self.cache_provider.provider_name, "display_name": self.cache_provider.display_name, "status": "cached", "is_cached": True, "stale": stale, "captured_at": captured_at, "errors": errors, "last_error": "；".join(errors + ([warning] if warning else [])), "hotlist_evidence": self._hotlist_evidence(safe_topics, provider_name=self.cache_provider.provider_name, status="cached", captured_at=captured_at, cache_age_seconds=age), "provider_diagnostics": provider_diagnostics, "pre_dedupe_live_topics": 0, "deduplicated_live_topics": 0, "topics_with_url_or_identifier": 0, "topics_with_captured_at": 0, "cached_topic_count": len(safe_topics), "cache_age_seconds": age, "elapsed_ms": int((time.perf_counter() - refresh_started) * 1000)}
+            filter_stats = self._filter_stats(len(cached_raw), len(deduped_cached), len(safe_topics), filtered_commercial, duplicate_count=max(0, len(cached_raw) - len(deduped_cached)))
+            hotlist_evidence = self._hotlist_evidence(safe_topics, provider_name=self.cache_provider.provider_name, status="cached", captured_at=captured_at, cache_age_seconds=age)
+            hotlist_evidence["filter_stats"] = filter_stats
+            return {"topics": safe_topics, "provider_name": self.cache_provider.provider_name, "display_name": self.cache_provider.display_name, "status": "cached", "is_cached": True, "stale": stale, "captured_at": captured_at, "errors": errors, "last_error": "；".join(errors + ([warning] if warning else [])), "hotlist_evidence": hotlist_evidence, "filter_stats": filter_stats, "provider_diagnostics": provider_diagnostics, "pre_dedupe_live_topics": 0, "deduplicated_live_topics": 0, "topics_with_url_or_identifier": 0, "topics_with_captured_at": 0, "cached_topic_count": len(safe_topics), "cache_age_seconds": age, "elapsed_ms": int((time.perf_counter() - refresh_started) * 1000)}
         except Exception as exc:
             detail = classify_network_error(exc)
             safe_display_name = redact_sensitive_text(self.cache_provider.display_name)
@@ -205,7 +230,9 @@ class HotTrendService:
             hours = {"最近1小时": 1, "最近6小时": 6, "最近24小时": 24}.get(time_range)
             if hours:
                 captured_after = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        return self.store.list_topics(keyword, category, source, sort, captured_after)
+        topics = self.store.list_topics(keyword, category, source, sort, captured_after)
+        valid, _ = filter_public_hotspots(topics)
+        return valid
 
     def add_manual_topic(self, title: str, summary: str = "", source_url: str = "") -> HotTopic:
         topics = ManualHotSource(title, summary, source_url=source_url).fetch()
@@ -222,6 +249,18 @@ class HotTrendService:
         selected = [all_topics[topic_id] for topic_id in topic_ids if topic_id in all_topics]
         if len(selected) != len(topic_ids):
             raise ValueError("存在无效或已不存在的话题")
+        blocked = [(topic, blocked_topic_reason(topic)) for topic in selected]
+        blocked = [(topic, reason) for topic, reason in blocked if reason]
+        if blocked:
+            topic, reason = blocked[0]
+            details = {
+                "hotspot_id": topic.id,
+                "title": topic.title,
+                "commercial_score": reason.get("commercial_score", 0),
+                "matched_signals": reason.get("matched_signals", []),
+                "filter_reason": reason.get("filter_reason"),
+            }
+            raise ValueError("TOPIC-COMMERCIAL-FILTERED:" + json.dumps(details, ensure_ascii=False))
         return selected
 
     def get_basket(self) -> list[dict[str, Any]]:

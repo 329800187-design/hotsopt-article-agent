@@ -87,7 +87,7 @@ def test_api_batch_list_does_not_start_batches(monkeypatch):
 def test_content_page_uses_bounded_retryable_loading_paths():
     source = (ROOT / "ui" / "rc1_app.py").read_text(encoding="utf-8")
 
-    assert '"/batches?limit=20"' in source
+    assert '"/batches?limit=20&refresh=false"' in source
     assert '"/tasks?limit=20&unbatched=true"' in source
     assert 'key="rc1_content_retry"' in source
     assert 'CONTENT-LIST-001' in source

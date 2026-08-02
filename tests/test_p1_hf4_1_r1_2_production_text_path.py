@@ -822,20 +822,22 @@ class TestArticleParseErrorModelOutputEmptyFallback:
         """ARTICLE_PARSE_ERROR should preserve research and require a text retry."""
         result = self._run_with_error(tmp_path, monkeypatch, "ARTICLE_PARSE_ERROR", "\u6a21\u578b\u672a\u8fd4\u56de\u53ef\u8bfb\u6b63\u6587")
         assert result["status"] == "failed"
-        assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+        assert result["error_code"] == "ARTICLE_PARSE_ERROR"
         assert result["provider_error_code"] == "ARTICLE_PARSE_ERROR"
         assert result["text_generation_result"] == "fallback"
-        assert result["retryable"] is True
+        assert result["retryable"] is False
+        assert "ARTICLE_TEXT_RETRY_REQUIRED" in result["quality_gate"]["reasons"]
         assert result.get("article") is None
 
     def test_model_output_empty_requires_text_retry(self, tmp_path, monkeypatch):
         """MODEL_OUTPUT_EMPTY should preserve research and require a text retry."""
         result = self._run_with_error(tmp_path, monkeypatch, "MODEL_OUTPUT_EMPTY", "text model returned reasoning_content but no content")
         assert result["status"] == "failed"
-        assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+        assert result["error_code"] == "MODEL_OUTPUT_EMPTY"
         assert result["provider_error_code"] == "MODEL_OUTPUT_EMPTY"
         assert result["text_generation_result"] == "fallback"
-        assert result["retryable"] is True
+        assert result["retryable"] is False
+        assert "ARTICLE_TEXT_RETRY_REQUIRED" in result["quality_gate"]["reasons"]
         assert result.get("article") is None
 
     def test_non_whitelisted_error_still_raises(self, tmp_path, monkeypatch):

@@ -423,14 +423,15 @@ class TestWordExport:
             f"first paragraph '{paragraphs[0].text}' != title '{article['title']}'"
         )
 
-    def test_docx_includes_limited_source_section(self, tmp_path: Path):
-        """Docx must include the customer-facing limited source section."""
+    def test_docx_omits_limited_source_section(self, tmp_path: Path):
+        """Docx must not expose internal source sections."""
         article = _good_hotlist_article()
         output = tmp_path / "test.docx"
         export_article(article, output)
         doc = Document(str(output))
         all_text = "\n".join(p.text for p in doc.paragraphs)
-        assert "资料来源" in all_text
+        assert "资料来源" not in all_text
+        assert "原文链接" not in all_text
 
     def test_docx_omits_ai_statement(self, tmp_path: Path):
         """Docx must not expose AI generation statements."""

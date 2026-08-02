@@ -12,6 +12,7 @@ from docx.shared import Inches, Pt, RGBColor
 
 from generation.image_budget import count_body_chinese_chars
 from generation.content_quality import contamination_hits
+from export.customer_output import body_markdown_from_sections, customer_visible_article, ensure_no_customer_meta_content
 from export.layout_pipeline import prepare_article_layout
 
 DEFAULT_FONT = "宋体"
@@ -82,16 +83,7 @@ def _image_index(article: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _body_markdown_from_sections(article: dict[str, Any]) -> str:
-    if str(article.get("body_markdown") or "").strip():
-        return str(article.get("body_markdown") or "").strip()
-    parts: list[str] = []
-    for section in article.get("sections") or []:
-        if not isinstance(section, dict):
-            continue
-        body = str(section.get("body") or "").strip()
-        if body:
-            parts.append(body)
-    return "\n\n".join(parts).strip()
+    return body_markdown_from_sections(article)
 
 
 def ensure_article_ready_for_docx_export(article: dict[str, Any] | None) -> None:
@@ -113,6 +105,10 @@ def ensure_article_ready_for_docx_export(article: dict[str, Any] | None) -> None
         or contamination_hits(str(article.get("content_markdown") or body_markdown))
     ):
         raise ValueError(f"ARTICLE_NOT_READY: {ARTICLE_NOT_READY_MESSAGE}")
+    try:
+        ensure_no_customer_meta_content(article)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _format_body_paragraph(paragraph: Any, *, first_line: bool = True) -> None:
@@ -194,12 +190,12 @@ def _add_source_paragraph(document: Document, source: str) -> None:
 
 
 def _add_article_content(document: Document, article: dict[str, Any], base_dir: Path | None) -> None:
-    article = prepare_article_layout(article)
+    article = customer_visible_article(prepare_article_layout(article))
     heading = document.add_paragraph(article["title"], style="Title")
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_paragraph_font(heading, TITLE_FONT, 20, bold=True)
 
-    subtitle = str(article.get("subtitle") or article.get("intro") or "").strip()
+    subtitle = str(article.get("subtitle") or article.get("lead") or article.get("intro") or "").strip()
     if subtitle:
         paragraph = document.add_paragraph(subtitle, style="Subtitle")
         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -227,19 +223,6 @@ def _add_article_content(document: Document, article: dict[str, Any], base_dir: 
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             if _add_image(paragraph, image.get("path"), base_dir, 5.8):
                 _caption(document, str(image.get("caption") or f"配图 {index}"))
-
-    keywords = article.get("keywords") or []
-    if keywords:
-        paragraph = document.add_paragraph("关键词：" + "、".join(str(item) for item in keywords))
-        paragraph.paragraph_format.first_line_indent = Pt(0)
-        _set_paragraph_font(paragraph, DEFAULT_FONT, 11)
-
-    sources = [str(item).strip() for item in (article.get("source_list") or []) if str(item).strip()][:5]
-    if sources:
-        title = document.add_paragraph("资料来源", style="Heading 1")
-        _set_paragraph_font(title, TITLE_FONT, 15, bold=True)
-        for source in sources:
-            _add_source_paragraph(document, source)
 
 
 

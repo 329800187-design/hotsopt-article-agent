@@ -288,7 +288,8 @@ def test_MODEL_TIMEOUT_LOCAL_FALLBACK_PASS(monkeypatch: pytest.MonkeyPatch, tmp_
     result = single_task.run_single_task(task, text_profile, image_profile, settings={"network": {}, "image_plan_mode": "none"}, store=store)
 
     assert result["status"] == "failed"
-    assert result["error_code"] == "ARTICLE_TEXT_RETRY_REQUIRED"
+    assert result["error_code"] == "TIMEOUT"
+    assert "ARTICLE_TEXT_RETRY_REQUIRED" in result["quality_gate"]["reasons"]
     assert result["provider_error_code"] == "TIMEOUT"
     assert result["retryable"] is True
     assert result["article"] is None

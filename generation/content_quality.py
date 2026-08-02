@@ -5,6 +5,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from typing import Any
 
+from export.customer_output import body_markdown_from_sections, meta_content_hits
 from generation.image_budget import count_body_chinese_chars
 from modules.source_formatter import normalize_source_list
 
@@ -241,6 +242,14 @@ def _ngram_similarity(left: str, right: str, n: int) -> float:
 
 def intra_article_quality(article: dict[str, Any], research_bundle: dict[str, Any] | None = None) -> dict[str, Any]:
     markdown = str(article.get("content_markdown") or "")
+    visible_text = "\n".join(
+        str(item or "")
+        for item in (
+            article.get("title"),
+            article.get("lead") or article.get("intro") or article.get("summary"),
+            body_markdown_from_sections(article),
+        )
+    )
     paragraphs = _body_paragraphs(markdown)
     sentences = _sentence_list(markdown)
     heading_hits = re.findall(r"^#{2,6}\s*(.+)$", markdown, flags=re.M)
@@ -290,6 +299,8 @@ def intra_article_quality(article: dict[str, Any], research_bundle: dict[str, An
         failures.append("SIMILAR_PARAGRAPHS")
     if contamination_hits(markdown):
         failures.append("SOURCE_CONTENT_CONTAMINATED")
+    if meta_content_hits(visible_text):
+        failures.append("ARTICLE_META_CONTENT_LEAK")
     if incomplete:
         failures.append("INCOMPLETE_SENTENCE")
     if dangling_markers:
@@ -315,6 +326,7 @@ def intra_article_quality(article: dict[str, Any], research_bundle: dict[str, An
         "similar_paragraph_pairs": similar_pairs[:10],
         "max_paragraph_similarity": round(max_similarity, 4),
         "contamination_hits": contamination_hits(markdown),
+        "meta_content_hits": meta_content_hits(visible_text),
         "incomplete_sentences": incomplete,
         "dangling_list_marker_hits": dangling_markers,
         "misleading_aircraft_accident_hits": aircraft_wording,
@@ -765,7 +777,10 @@ def quality_gate(article: dict[str, Any], research_bundle: dict[str, Any] | None
         hard_reasons.append("ARTICLE_TEXT_RETRY_REQUIRED")
     if not intra.get("passed", True):
         for code in intra.get("failures") or []:
-            hard_reasons.append("SOURCE_CONTENT_CONTAMINATED" if code == "SOURCE_CONTENT_CONTAMINATED" else f"ARTICLE_QUALITY_BLOCKED:{code}")
+            if code in {"SOURCE_CONTENT_CONTAMINATED", "ARTICLE_META_CONTENT_LEAK"}:
+                hard_reasons.append(code)
+            else:
+                hard_reasons.append(f"ARTICLE_QUALITY_BLOCKED:{code}")
     if accepted_source_count <= 0:
         if limited_research_mode:
             warning_reasons.append("当前仅获取到热榜标题和有限元数据，发布前请补充核对权威来源。")

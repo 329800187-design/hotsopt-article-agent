@@ -23,7 +23,7 @@ from modules.security import redact_sensitive_text, sanitize_json, sanitize_sens
 from modules.task_locks import task_lock
 from research.service import ResearchService, load_research_bundle
 from modules.source_formatter import normalize_source_list
-from providers.errors import is_retryable_error, map_provider_exception
+from providers.errors import is_retryable_error, map_provider_exception, user_facing_error_message
 from providers.image_provider import OpenAIImageProvider, inspect_image
 from providers.text_provider import OpenAITextProvider, ProviderError
 from generation.versioning import MANAGED_FILES, VersionCommitError, commit_candidate, finalize_candidate, formal_files_match, recover_version_commits, snapshot_current, rollback_candidate, update_commit_record, write_intended_state
@@ -1161,15 +1161,16 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                     raise
                 used_fallback = True
                 state["text_generation_result"] = "fallback"
-                retry_message = "公开资料已保存，但正文模型返回异常，请重新生成正文。资料不会丢失。"
+                provider_code = str(exc.code)
+                retry_message = user_facing_error_message(provider_code, "公开资料已保存，但正文模型返回异常，请重新生成正文。资料不会丢失。")
                 gate = {
                     "status": "failed",
                     "passed": False,
                     "hard_error_count": 1,
                     "warning_count": 0,
-                    "hard_errors": ["ARTICLE_TEXT_RETRY_REQUIRED"],
+                    "hard_errors": [provider_code],
                     "warnings": [],
-                    "reasons": ["ARTICLE_TEXT_RETRY_REQUIRED", str(exc.code)],
+                    "reasons": ["ARTICLE_TEXT_RETRY_REQUIRED", provider_code],
                     "metrics": {"source_count": accepted_source_count},
                 }
                 state["research_bundle"] = sanitize_json(bundle or {})
@@ -1184,9 +1185,9 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                     "stage": "generating_article",
                     "progress": 35,
                     "failed_step": "generating_article",
-                    "error_code": "ARTICLE_TEXT_RETRY_REQUIRED",
+                    "error_code": provider_code,
                     "safe_error_message": retry_message,
-                    "retryable": True,
+                    "retryable": is_retryable_error(provider_code),
                     "used_local_fallback": False,
                     "fallback_kind": "",
                     "image_usage": {"generation_calls": 0, "paid_calls": 0, "retry_calls": 0, "budget_exceeded": False},

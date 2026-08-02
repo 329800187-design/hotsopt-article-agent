@@ -29,6 +29,8 @@ NON_RETRYABLE_ERROR_CODES = {
     "UNSUPPORTED_RESPONSE_FORMAT",
     "TASK_CANCELLED",
     "TEXT_MODEL_NOT_VERIFIED",
+    "ARTICLE_META_CONTENT_LEAK",
+    "TOPIC-COMMERCIAL-FILTERED",
 }
 
 
@@ -59,6 +61,16 @@ USER_FACING_ERROR_MESSAGES = {
     "TEXT_MODEL_NOT_VERIFIED": "当前文本模型尚未测试。\n请先在\u201c模型设置\u201d中完成测试，再重新写文章。\n错误码：TEXT_MODEL_NOT_VERIFIED",
     "ARTICLE_PARSE_ERROR": "文章解析失败，模型已返回正文但结构整理出错，请重试。\n错误码：ARTICLE_PARSE_ERROR",
     "MODEL_OUTPUT_REASONING_ONLY": "当前模型只返回了推理内容，没有返回可用正文。\n请改用普通对话/写作模型，或检查中转服务的模型配置。\n错误码：MODEL_OUTPUT_REASONING_ONLY",
+    "TOPIC-COMMERCIAL-FILTERED": "该内容属于商品推广、电商或招聘信息，不适合作为普通热点文章生成。请选择其他热点。\n错误码：TOPIC-COMMERCIAL-FILTERED",
+    "ARTICLE_META_CONTENT_LEAK": "正文中包含资料来源、原文链接、AI 声明或内部写作说明，已阻止导出。\n请重新生成或编辑正文后再导出。\n错误码：ARTICLE_META_CONTENT_LEAK",
+    "ARTICLE_QUALITY_BLOCKED": "文章未通过内容质量检查，暂不能作为正式成品导出。\n错误码：ARTICLE_QUALITY_BLOCKED",
+    "SOURCE_CONTENT_INSUFFICIENT": "公开资料不足，暂不能生成可交付文章。\n错误码：SOURCE_CONTENT_INSUFFICIENT",
+    "HOTSPOT_RESEARCH_FAILED": "热点资料查询失败，请稍后重试或更换热点。\n错误码：HOTSPOT_RESEARCH_FAILED",
+    "MODEL_CONNECTION_FAILED": "文本模型连接失败，请进入模型设置完成测试后再重试。\n错误码：MODEL_CONNECTION_FAILED",
+    "MODEL_HTTP_ERROR": "模型服务返回异常状态，请检查模型、接口地址和账号权限。\n错误码：MODEL_HTTP_ERROR",
+    "MODEL_OUTPUT_PARSE_FAILED": "模型返回内容无法整理为文章结构，请重试或更换模型。\n错误码：MODEL_OUTPUT_PARSE_FAILED",
+    "IMAGE_GENERATION_FAILED": "图片生成失败，文章正文已保留，请稍后重试图片。\n错误码：IMAGE_GENERATION_FAILED",
+    "EXPORT_FAILED": "导出失败，请稍后重试。\n错误码：EXPORT_FAILED",
 }
 def user_facing_error_message(code: str, fallback: str = "") -> str:
     return USER_FACING_ERROR_MESSAGES.get(str(code), fallback or "网络连接异常")

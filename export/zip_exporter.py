@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from export.customer_output import customer_visible_article
 from export.docx_exporter import export_article, export_combined, ensure_article_ready_for_docx_export
 from modules.security import sanitize_sensitive_data
 
@@ -36,7 +37,7 @@ def export_article_bundle(article: dict[str, Any], task_root: Path, output_path:
     with tempfile.TemporaryDirectory(prefix="article-export-") as temporary:
         staging = Path(temporary) / title
         staging.mkdir(parents=True, exist_ok=True)
-        clean_article = sanitize_sensitive_data(article)
+        clean_article = sanitize_sensitive_data(customer_visible_article(article))
         export_article(clean_article, staging / f"{title}.docx", task_root)
         images = clean_article.get("images") or []
         for index, item in enumerate(images, start=1):
@@ -44,7 +45,6 @@ def export_article_bundle(article: dict[str, Any], task_root: Path, output_path:
             if source.is_file() and item.get("status") == "completed":
                 name = "cover.png" if item.get("role") == "cover" else f"正文图片{index:02d}.png"
                 shutil.copy2(source, staging / name)
-        (staging / "使用说明.txt").write_text("本文件由热点图文工作台生成。发布前请复核事实、来源和图片版权。", encoding="utf-8")
         return export_zip(staging, output_path)
 
 
@@ -58,7 +58,7 @@ def export_batch_bundle(articles: list[tuple[dict[str, Any], Path]], output_path
             folder = staging / f"{index:02d}_{safe_filename(str(article.get('title') or '文章'))}"
             folder.mkdir(parents=True, exist_ok=True)
             title = safe_filename(str(article.get("title") or f"文章{index}"))
-            export_article(sanitize_sensitive_data(article), folder / f"{title}.docx", task_root)
+            export_article(sanitize_sensitive_data(customer_visible_article(article)), folder / f"{title}.docx", task_root)
             for image_index, item in enumerate(article.get("images") or [], start=1):
                 source = task_root / str(item.get("path") or "")
                 if source.is_file() and item.get("status") == "completed":
@@ -66,7 +66,7 @@ def export_batch_bundle(articles: list[tuple[dict[str, Any], Path]], output_path
                     shutil.copy2(source, folder / name)
         combined_articles: list[dict[str, Any]] = []
         for article, task_root in articles:
-            combined = sanitize_sensitive_data(article)
+            combined = sanitize_sensitive_data(customer_visible_article(article))
             combined["images"] = [
                 {**item, "path": str(task_root / str(item.get("path") or ""))}
                 for item in combined.get("images") or []
