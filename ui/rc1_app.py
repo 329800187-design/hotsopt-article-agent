@@ -948,7 +948,6 @@ def render_start(service: Any) -> None:
             st.session_state[request_id_key] = client_request_id
             st.session_state[last_submit_ts_key] = now_ts
             st.session_state[last_batch_id_key] = batch["batch_id"]
-            _api("POST", f"/batches/{batch['batch_id']}/start")
             st.success("已开始生成，可在「我的内容」查看进度。")
             _navigate_to("📋 我的内容")
             st.rerun()
@@ -1231,6 +1230,39 @@ def _content(restricted: bool = False) -> None:
                 st.rerun()
             except Exception as exc:
                 st.error(f"失败任务清理失败：{exc}")
+    selected_detail_task = str(st.session_state.get("rc1_content_detail_task_id") or "")
+    if not selected_detail_task:
+        st.caption("任务列表先显示轻量摘要；打开单条任务后才加载正文、图片和版本信息。")
+        for batch in batches:
+            total = int(batch.get("total_count") or 0)
+            completed = int(batch.get("completed_count") or 0)
+            with st.container(border=True):
+                st.subheader(str(batch.get("batch_name") or "未命名创作"))
+                st.caption(f"{_status(batch.get('status'))} · {completed}/{total} 篇完成 · 创建于 {batch.get('created_at', '')}")
+                st.progress(min(1.0, completed / total) if total else 0.0)
+                for item in (batch.get("items") or []):
+                    task = item.get("task") or {}
+                    task_id = str(task.get("task_id") or "")
+                    if not task_id:
+                        continue
+                    topics = task.get("selected_topics") if isinstance(task.get("selected_topics"), list) else []
+                    topic = topics[0] if topics and isinstance(topics[0], dict) else {}
+                    label = str(topic.get("title") or task.get("task_name") or "未命名任务")
+                    status = _status(task.get("status"))
+                    left, right = st.columns([4, 1])
+                    left.write(f"{label} · {status}")
+                    if right.button("查看详情", key=f"rc1_open_detail_{task_id}"):
+                        st.session_state["rc1_content_detail_task_id"] = task_id
+                        st.rerun()
+        return
+
+    if st.button("返回任务列表", key="rc1_content_back_to_list"):
+        st.session_state.pop("rc1_content_detail_task_id", None)
+        st.rerun()
+    batches = [
+        batch for batch in batches
+        if any(str((item.get("task") or {}).get("task_id") or "") == selected_detail_task for item in (batch.get("items") or []))
+    ]
     for batch in batches:
         total, completed = int(batch.get("total_count") or 0), int(batch.get("completed_count") or 0)
         batch_items = batch.get("items") or []
@@ -1282,6 +1314,8 @@ def _content(restricted: bool = False) -> None:
             for item in batch_items:
                 task = item.get("task") or {}
                 task_id = str(task.get("task_id") or "")
+                if task_id != selected_detail_task:
+                    continue
                 state = load_generation_task(task_id) or {}
                 topic_title = (item.get("topic_snapshot") or {}).get("title") or "未命名话题"
                 with st.expander(f"{item.get('position', 1)}. {topic_title} · {_status(task.get('status'))}"):

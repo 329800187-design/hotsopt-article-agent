@@ -4,7 +4,7 @@ import logging
 import threading
 import json
 import hashlib
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 from generation.executor import GenerationExecutor
@@ -35,6 +35,8 @@ class BatchExecutor:
         self._active: dict[str, Future] = {}
         self._semaphores: dict[str, threading.BoundedSemaphore] = {}
         self._quality_running: set[str] = set()
+        self._batch_start_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="batch-start")
+        self._batch_starts: dict[str, Future] = {}
         self._lock = threading.RLock()
 
     def _settings(self) -> dict[str, Any]:
@@ -283,7 +285,8 @@ class BatchExecutor:
             _logger.exception("_submit_inline_item: 提交失败 batch_id=%s task_id=%s", batch_id, task_id)
             raise
 
-    def start_batch(self, batch_id: str) -> dict[str, Any]:
+    def _start_batch_worker(self, batch_id: str) -> dict[str, Any]:
+        """Run research and child submission outside the HTTP request thread."""
         with self._lock:
             batch = self.store.get_batch(batch_id)
             if not batch:
@@ -334,6 +337,30 @@ class BatchExecutor:
                         _logger.exception("start_batch: 标记失败 task 也失败了 task_id=%s", task_id)
                 # 无论成功失败都继续下一个 item
             return self.store.refresh_batch(batch_id) or batch
+
+    def _forget_batch_start(self, batch_id: str, future: Future) -> None:
+        with self._lock:
+            if self._batch_starts.get(batch_id) is future:
+                self._batch_starts.pop(batch_id, None)
+
+    def start_batch_async(self, batch_id: str) -> dict[str, Any]:
+        """Accept a batch immediately; research and task submission happen in the background."""
+        with self._lock:
+            batch = self.store.get_batch(batch_id)
+            if not batch:
+                raise ProviderError("BATCH_NOT_FOUND", "batch not found")
+            if batch.get("status") in {"completed", "cancelled"}:
+                return batch
+            current = self._batch_starts.get(batch_id)
+            if not current or current.done():
+                future = self._batch_start_executor.submit(self._start_batch_worker, batch_id)
+                self._batch_starts[batch_id] = future
+                future.add_done_callback(lambda completed: self._forget_batch_start(batch_id, completed))
+            return self.store.refresh_batch(batch_id) or batch
+
+    def start_batch(self, batch_id: str) -> dict[str, Any]:
+        """Start synchronously for direct library callers and legacy integrations."""
+        return self._start_batch_worker(batch_id)
 
     def cancel_task(self, batch_id: str, task_id: str) -> dict[str, Any]:
         with self._lock:

@@ -32,7 +32,6 @@ class SQLiteStore:
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path, timeout=5)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
         return connection
@@ -59,6 +58,9 @@ class SQLiteStore:
 
     def init_schema(self) -> None:
         with self.connect() as connection:
+            # Set the journal mode once during initialization. Repeating this on
+            # every short-lived read connection serializes the whole local UI.
+            connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -510,6 +512,51 @@ class SQLiteStore:
             batch = self.get_batch(batch_id)
             if batch:
                 values.append(batch)
+        return values
+
+    def list_batch_summaries(self, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+        """Return the bounded content-list snapshot without N+1 detail queries."""
+        bounded_limit = max(1, min(int(limit), 100))
+        bounded_offset = max(0, int(offset))
+        with self.connect() as connection:
+            batch_rows = connection.execute(
+                "SELECT * FROM generation_batches ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (bounded_limit, bounded_offset),
+            ).fetchall()
+            if not batch_rows:
+                return []
+            batch_ids = [str(row["batch_id"]) for row in batch_rows]
+            placeholders = ",".join("?" for _ in batch_ids)
+            item_rows = connection.execute(
+                f"SELECT i.batch_id,i.batch_item_id,i.position,i.topic_snapshot,"
+                f"t.task_id,t.task_name,t.mode,t.selected_topics,t.article_count,t.status "
+                f"FROM generation_batch_items i JOIN generation_tasks t ON t.task_id=i.task_id "
+                f"WHERE i.batch_id IN ({placeholders}) ORDER BY i.batch_id,i.position",
+                batch_ids,
+            ).fetchall()
+        grouped: dict[str, list[dict[str, Any]]] = {batch_id: [] for batch_id in batch_ids}
+        for row in item_rows:
+            selected_topics = self._json_loads(row["selected_topics"], [])
+            grouped[str(row["batch_id"])].append({
+                "batch_item_id": row["batch_item_id"],
+                "position": row["position"],
+                "topic_snapshot": self._json_loads(row["topic_snapshot"], {}),
+                "task": {
+                    "task_id": row["task_id"],
+                    "task_name": row["task_name"],
+                    "mode": row["mode"],
+                    "selected_topics": selected_topics,
+                    "article_count": row["article_count"],
+                    "status": row["status"],
+                },
+            })
+        values: list[dict[str, Any]] = []
+        for row in batch_rows:
+            batch = sanitize_sensitive_data(dict(row))
+            batch["generation_options"] = self._json_loads(batch.get("generation_options"), {})
+            batch["items"] = grouped.get(str(batch["batch_id"]), [])
+            batch["tasks"] = [item["task"] for item in batch["items"]]
+            values.append(batch)
         return values
 
     def list_batch_items(self, batch_id: str) -> list[dict[str, Any]]:

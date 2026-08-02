@@ -358,7 +358,8 @@ async def license_import(file: UploadFile = File(...)) -> JSONResponse:
 @app.get("/api/health")
 def health() -> JSONResponse:
     try:
-        store.init_schema()
+        with store.connect() as connection:
+            connection.execute("SELECT 1").fetchone()
         return _response(True, {"service": "hotspot-workbench", "database": str(store.db_path), "status": "ok"})
     except Exception as exc:
         return _error("HEALTH_CHECK_FAILED", "服务健康检查失败", str(exc), retryable=True, status_code=503)
@@ -1425,7 +1426,7 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
         batch = batch_executor.store.create_batch(payload.batch_name, payload.mode, topics, options, concurrency, angle_plans)
         batch_id = str(batch.get("batch_id") or "")
         try:
-            batch = batch_executor.start_batch(batch_id) or batch
+            batch = batch_executor.start_batch_async(batch_id) or batch
         except Exception:
             _logger.exception("create_batch: start_batch failed batch_id=%s", batch_id)
             # 把每个 task 的失败原因写回 generation state
@@ -1448,6 +1449,9 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
 @app.get("/api/batches")
 def list_batches(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), refresh: bool = Query(True)) -> JSONResponse:
     try:
+        if not refresh and hasattr(batch_executor.store, "list_batch_summaries"):
+            items = batch_executor.store.list_batch_summaries(limit=limit, offset=offset)
+            return _response(True, {"items": items, "count": len(items), "limit": limit, "offset": offset, "item_errors": []})
         items = []
         item_errors: list[dict[str, Any]] = []
         for batch in batch_executor.store.list_batches(limit=limit, offset=offset):
@@ -1501,7 +1505,7 @@ def start_batch(batch_id: str) -> JSONResponse:
         image_mode = str(options.get("image_plan_mode") or load_settings().get("image_plan_mode") or "standard")
         if "image_plan_mode" in options and image_mode != "none" and not bool(options.get("confirm_paid")):
             return _error("PAID_BATCH_IMAGE_CONFIRMATION_REQUIRED", "我确认本次会真实调用图片模型，并可能产生费用。请先勾选确认后再开始生成。", {"generation_calls": 0, "charged": False}, retryable=False, status_code=400)
-        return _response(True, batch_executor.start_batch(batch_id), None, 202)
+        return _response(True, batch_executor.start_batch_async(batch_id), None, 202)
     except Exception as exc:
         return _batch_error_response(exc)
 
