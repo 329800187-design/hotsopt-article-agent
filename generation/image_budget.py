@@ -8,6 +8,9 @@ IMAGE_PLANS: dict[str, dict[str, Any]] = {
     "none": {"label": "纯文字", "cover": 0, "inline_min": 0, "inline_max": 0, "retry_limit": 0},
     "economy": {"label": "经济型", "cover": 1, "inline_min": 0, "inline_max": 0, "retry_limit": 0},
     "standard": {"label": "标准型", "cover": 1, "inline_min": 1, "inline_max": 1, "retry_limit": 0},
+    "three": {"label": "3张图", "cover": 1, "inline_min": 2, "inline_max": 2, "retry_limit": 0},
+    "four": {"label": "4张图", "cover": 1, "inline_min": 3, "inline_max": 3, "retry_limit": 0},
+    "five": {"label": "5张图", "cover": 1, "inline_min": 4, "inline_max": 4, "retry_limit": 0},
     "rich": {"label": "标准型", "cover": 1, "inline_min": 1, "inline_max": 1, "retry_limit": 0},
 }
 
@@ -24,6 +27,12 @@ def normalize_image_plan(value: str | None) -> str:
         "economic": "economy",
         "standard": "standard",
         "rich": "standard",
+        "three": "three",
+        "3": "three",
+        "four": "four",
+        "4": "four",
+        "five": "five",
+        "5": "five",
     }
     return aliases.get(normalized, "none")
 
@@ -32,7 +41,7 @@ def image_plan_for(word_count: int, mode: str = "standard") -> dict[str, Any]:
     normalized = normalize_image_plan(mode)
     plan = dict(IMAGE_PLANS[normalized])
     words = int(word_count or 0)
-    inline_count = 0 if normalized != "standard" else 1
+    inline_count = int(plan.get("inline_min") or 0)
     plan.update({"mode": normalized, "word_count": words, "inline_count": inline_count, "max_calls": int(plan["cover"]) + inline_count})
     return plan
 
@@ -40,7 +49,7 @@ def image_plan_for(word_count: int, mode: str = "standard") -> dict[str, Any]:
 def calculate_image_budget(article_count: int, image_mode: str) -> int:
     count = max(0, int(article_count or 0))
     mode = normalize_image_plan(image_mode)
-    per_article = {"none": 0, "economy": 1, "standard": 2}[mode]
+    per_article = {"none": 0, "economy": 1, "standard": 2, "three": 3, "four": 4, "five": 5}[mode]
     return count * per_article
 
 

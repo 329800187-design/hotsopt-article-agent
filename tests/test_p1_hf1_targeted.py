@@ -77,8 +77,8 @@ def test_single_task_defers_images_until_manual_confirmation_pass():
 def test_manual_image_generation_limits_inline_to_one_pass():
     api = read("api.py")
     selected_images = read("generation/selected_images.py")
-    assert "inline_count: int = Field(default=0, ge=0, le=1)" in api
-    assert 'inline_count = max(0, min(1, int(inline_count)))' in selected_images
+    assert "inline_count: int = Field(default=0, ge=0, le=4)" in api
+    assert 'inline_count = max(0, min(4, int(inline_count)))' in selected_images
 
 
 def test_hotspot_refresh_merges_multiple_sources_and_dedupes_pass(tmp_path):

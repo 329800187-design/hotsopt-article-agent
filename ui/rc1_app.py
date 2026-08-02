@@ -442,7 +442,9 @@ def _render_hotspot_tab(service: Any) -> None:
     with filter_cols[1]:
         category = st.selectbox("分类筛选", ["全部"] + sorted({str(item.get("category") or "综合热点") for item in topics}), key="rc1_hotspot_category")
     with filter_cols[2]:
-        sort_option = st.selectbox("排序方式", ["排名排序", "热度排序"], key="rc1_hotspot_sort")
+        source = st.selectbox("平台来源", ["全部"] + sorted({str(item.get("source_name") or item.get("source") or "未知来源") for item in topics}), key="rc1_hotspot_source")
+    with filter_cols[3]:
+        sort_option = st.selectbox("排序方式", ["排名排序", "热度排序", "最新更新"], key="rc1_hotspot_sort")
     sort_map = {"排名排序": "rank_asc", "热度排序": "hot_desc"}
     with filter_cols[3]:
         per_page = st.selectbox("每页条数", [20, 50, 100, "全部"], index=0, key="rc1_hotspot_per_page")
@@ -451,13 +453,17 @@ def _render_hotspot_tab(service: Any) -> None:
     filtered = [item for item in topics]
     if keyword.strip():
         kw = keyword.strip().lower()
-        filtered = [item for item in filtered if kw in str(item.get("title", "")).lower()]
+        filtered = [item for item in filtered if any(kw in str(item.get(key) or "").lower() for key in ("title", "summary", "category", "source_name", "source"))]
     if category != "全部":
         filtered = [item for item in filtered if str(item.get("category", "")) == category]
+    if source != "全部":
+        filtered = [item for item in filtered if str(item.get("source_name") or item.get("source") or "未知来源") == source]
     if sort_option == "排名排序":
         filtered = sorted(filtered, key=lambda x: int(x.get("rank") or 99999))
-    else:
+    elif sort_option == "热度排序":
         filtered = sorted(filtered, key=lambda x: float(x.get("hot_value") or 0), reverse=True)
+    else:
+        filtered = sorted(filtered, key=lambda x: str(x.get("captured_at") or x.get("updated_at") or ""), reverse=True)
 
     total_filtered = len(filtered)
     st.caption(f"符合条件：{total_filtered} 条")
@@ -669,7 +675,7 @@ def _render_title_input_tab(service: Any) -> None:
 
 
 def _render_batch_links_tab(service: Any) -> None:
-    st.caption("可一次粘贴最多 5 个链接并自动抓取标题。")
+    st.caption("可一次粘贴最多 20 个链接并自动抓取标题。")
 
     links_text = st.text_area(
         "批量链接",
@@ -685,16 +691,16 @@ def _render_batch_links_tab(service: Any) -> None:
         if line not in seen:
             seen.add(line)
             unique_lines.append(line)
-    valid_links = unique_lines[:5]
+    valid_links = unique_lines[:20]
 
-    if unique_lines and len(unique_lines) > 5:
-        st.warning("一次最多处理 5 个链接，仅保留前 5 个。")
+    if unique_lines and len(unique_lines) > 20:
+        st.warning("一次最多处理 20 个链接，仅保留前 20 个。")
     if len(unique_lines) != len(lines):
         st.info(f"已自动去重 {len(lines) - len(unique_lines)} 个重复链接。")
 
-    st.caption(f"待处理 {len(valid_links)}/5")
+    st.caption(f"待处理 {len(valid_links)}/20")
     if not valid_links:
-        st.info("请输入 1 到 5 个链接，每行 1 个。")
+        st.info("请输入 1 到 20 个链接，每行 1 个。")
 
     link_states_key = "rc1_link_states"
     if link_states_key not in st.session_state:
@@ -800,14 +806,15 @@ def render_start(service: Any) -> None:
     # === Cost Mode Selection ===
     cost_mode_label = st.radio(
         "💰 成本模式",
-        ["🟢 低成本模式（纯文字，0张图片）", "🟡 经济配图模式（每篇1张封面）", "🔵 标准配图模式（每篇1封面+1正文图）"],
+        ["🟢 低成本模式（纯文字，0张图片）", "🟡 3张图（1封面+2正文图）", "🔵 4张图（1封面+3正文图）", "🟣 5张图（1封面+4正文图）"],
         horizontal=True,
         key="rc1_cost_mode"
     )
     cost_mode_map = {
         "🟢 低成本模式（纯文字，0张图片）": "none",
-        "🟡 经济配图模式（每篇1张封面）": "economy",
-        "🔵 标准配图模式（每篇1封面+1正文图）": "standard",
+        "🟡 3张图（1封面+2正文图）": "three",
+        "🔵 4张图（1封面+3正文图）": "four",
+        "🟣 5张图（1封面+4正文图）": "five",
     }
     image_mode = cost_mode_map[cost_mode_label]
 
@@ -1384,6 +1391,10 @@ def _content(restricted: bool = False) -> None:
                                 include_cover = True
                                 inline_count = 1
                                 st.caption("已选择标准型：每篇生成 1 张封面图和 1 张正文图。")
+                            elif requested_mode in {"three", "four", "five"}:
+                                include_cover = True
+                                inline_count = {"three": 2, "four": 3, "five": 4}[requested_mode]
+                                st.caption(f"已选择{inline_count + 1}张图：1张封面图和{inline_count}张正文图。")
                             else:
                                 include_cover = False
                                 inline_count = 0

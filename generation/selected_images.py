@@ -30,7 +30,13 @@ def _persist(state: dict[str, Any], store: Any) -> dict[str, Any]:
 
 
 def _requested_plan(include_cover: bool, inline_count: int) -> str:
-    if inline_count >= 1:
+    if inline_count >= 4:
+        return "five"
+    if inline_count == 3:
+        return "four"
+    if inline_count == 2:
+        return "three"
+    if inline_count == 1:
         return "standard"
     if include_cover:
         return "economy"
@@ -55,7 +61,7 @@ def _inline_ready_count(state: dict[str, Any], task_root: Path) -> int:
 
 
 def generate_selected_images(task_id: str, image_profile: dict[str, Any], settings: dict[str, Any], store: Any, *, include_cover: bool = True, inline_count: int = 0) -> dict[str, Any]:
-    inline_count = max(0, min(1, int(inline_count)))
+    inline_count = max(0, min(4, int(inline_count)))
     image_mode = _requested_plan(include_cover, inline_count)
     task_root = generation_task_dir(task_id)
     with task_lock(task_id):

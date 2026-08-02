@@ -179,7 +179,7 @@ class GenerationOptions(BaseModel):
     style: Literal["客观通俗", "犀利评论", "专业分析"] = "客观通俗"
     image_style: Literal["动漫化新闻插画", "二维国漫新闻插画", "国风 3D 新闻插画"] = "动漫化新闻插画"
     word_count: Literal[1200, 1500, 1600] = 1200
-    image_plan_mode: Literal["none", "economy", "standard"] | None = None
+    image_plan_mode: Literal["none", "economy", "standard", "three", "four", "five"] | None = None
     image_call_budget_per_article: int | None = Field(default=None, ge=0, le=20)
     image_call_budget_per_batch: int | None = Field(default=None, ge=0, le=100)
     image_retry_limit: int | None = Field(default=None, ge=0, le=1)
@@ -250,7 +250,7 @@ class InlineImageRetryRequest(BaseModel):
 class ImageSelectionRequest(BaseModel):
     confirm_paid: bool = False
     include_cover: bool = True
-    inline_count: int = Field(default=0, ge=0, le=1)
+    inline_count: int = Field(default=0, ge=0, le=4)
 
 
 class ArticleEditRequest(BaseModel):
