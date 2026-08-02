@@ -10,7 +10,7 @@ from typing import Iterable
 
 EXCLUDED_RELATIVE = {"config/settings.json"}
 EXCLUDED_PARTS = {".git", ".venv", "__pycache__", ".venv-r227-build"}
-PROJECT_RUNTIME_PARTS = {"data", "release", "runtime"}
+PROJECT_RUNTIME_PARTS = {"build", "data", "license_exports", "logs", "release", "runtime"}
 PATTERNS = {
     "private_key_material": re.compile(rb"-----BEGIN (?:ENCRYPTED )?" + b"PRIVATE" + rb" KEY-----|-----BEGIN RSA " + b"PRIVATE" + rb" KEY-----"),
     "openai_key": re.compile(rb"\bsk-[A-Za-z0-9_-]{20,}\b"),
@@ -62,14 +62,20 @@ def _is_excluded(root: Path, path: Path) -> bool:
         and "rc1-3-2" not in path.name
     ):
         return True
+    if path.suffix.lower() in {".exe", ".zip"} and (
+        path.name.startswith("hotspot-article-agent_") or path.name.startswith("RC1.3.3-Lite-")
+    ):
+        return True
     parts = path.relative_to(root).parts
     is_project_root = root == Path(__file__).resolve().parents[1]
     return (
         relative in EXCLUDED_RELATIVE
         or bool(EXCLUDED_PARTS.intersection(parts))
         or (is_project_root and bool(PROJECT_RUNTIME_PARTS.intersection(parts)))
-        or any(part.startswith(".pytest_") for part in parts)
+        or any(part.startswith(".pytest_") or part.startswith(".pytest-") for part in parts)
+        or any(part.startswith(".hf") and part.endswith("_manual") for part in parts)
         or any(part.startswith("rc_final_review_build_") for part in parts)
+        or any(part.startswith("real_smoke_final_review") for part in parts)
     )
 
 

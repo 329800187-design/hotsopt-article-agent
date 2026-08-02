@@ -19,12 +19,14 @@ from generation.source_overlap import analyze_source_overlap
 from modules.database import SQLiteStore, get_store
 from modules.generation_store import GenerationStateConflict, generation_task_dir, load_generation_task, save_generation_task
 from modules.models import HotTopic, utc_now
+from modules.config_store import save_settings
 from modules.security import redact_sensitive_text, sanitize_json, sanitize_sensitive_data
 from modules.task_locks import task_lock
 from research.service import ResearchService, load_research_bundle
 from modules.source_formatter import normalize_source_list
 from providers.errors import is_retryable_error, map_provider_exception, user_facing_error_message
 from providers.image_provider import OpenAIImageProvider, inspect_image
+from providers.text_model_resolver import INCOMPATIBLE_MODEL_ERRORS, persist_resolved_text_model, resolve_usable_text_model
 from providers.text_provider import OpenAITextProvider, ProviderError
 from generation.versioning import MANAGED_FILES, VersionCommitError, commit_candidate, finalize_candidate, formal_files_match, recover_version_commits, snapshot_current, rollback_candidate, update_commit_record, write_intended_state
 
@@ -37,6 +39,26 @@ class TaskCancelledError(ProviderError):
 def _safe_model_info(profile: dict[str, Any]) -> dict[str, Any]:
     allowed = {"name", "base_url", "endpoint", "model", "auth_type", "auth_header", "timeout_seconds", "response_format", "response_type", "size", "api_format", "enabled"}
     return sanitize_json({key: profile.get(key) for key in allowed if key in profile})
+
+
+def _text_resolution_state(resolution: dict[str, Any]) -> dict[str, Any]:
+    return sanitize_json(
+        {
+            "success": bool(resolution.get("success")),
+            "provider": resolution.get("provider"),
+            "configured_model": ((resolution.get("profile") or {}).get("configured_model") or ""),
+            "resolved_model": resolution.get("resolved_model"),
+            "base_url_hash": resolution.get("base_url_hash"),
+            "capability": resolution.get("capability"),
+            "verified_at": resolution.get("verified_at"),
+            "probe_status": resolution.get("probe_status"),
+            "response_parser_mode": resolution.get("response_parser_mode"),
+            "model_resolution_source": resolution.get("model_resolution_source"),
+            "error_code": resolution.get("error_code"),
+            "first_error_code": resolution.get("first_error_code"),
+            "probes": resolution.get("probes") or [],
+        }
+    )
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -1064,12 +1086,64 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
         configured_timeout = int(text_profile.get("timeout_seconds") or (settings.get("network") or {}).get("timeout_seconds") or 150)
         # Formal article generation uses a delivery timeout window; short connection-test timeouts must not leak here.
         text_timeout_limit = max(90, min(180, configured_timeout))
+        configured_text_model = str(text_profile.get("model") or "").strip()
         effective_text_profile = dict(text_profile)
+        should_resolve_text_model = bool(
+            run_article
+            and str(effective_text_profile.get("base_url") or "").strip()
+            and (
+                isinstance(settings.get("text_profile"), dict)
+                or str(settings.get("resolved_text_model") or "").strip()
+                or str(settings.get("verified_text_model") or "").strip()
+            )
+        )
+        if should_resolve_text_model:
+            resolution = resolve_usable_text_model(
+                settings,
+                effective_text_profile,
+                network_settings=settings.get("network"),
+                force_refresh=False,
+                source="generation_start",
+            )
+            resolution_profile = dict(resolution.get("profile") or {})
+            resolution_profile["configured_model"] = configured_text_model
+            resolution["profile"] = resolution_profile
+            state["model_resolution"] = _text_resolution_state(resolution)
+            if not resolution.get("success"):
+                code = str(resolution.get("error_code") or "NO_USABLE_TEXT_MODEL")
+                state["research_bundle"] = None
+                state["quality_gate"] = {
+                    "status": "failed",
+                    "passed": False,
+                    "hard_error_count": 1,
+                    "warning_count": 0,
+                    "hard_errors": [code],
+                    "warnings": [],
+                    "reasons": ["ARTICLE_TEXT_RETRY_REQUIRED", code],
+                    "metrics": {},
+                }
+                return _failure(
+                    state,
+                    store,
+                    "generating_article",
+                    ProviderError(code, str(resolution.get("error_message") or user_facing_error_message(code, "文本模型不可用于正式正文生成。")), details=resolution),
+                    "failed",
+                )
+            effective_text_profile = dict(resolution.get("profile") or effective_text_profile)
+            if str(resolution.get("probe_status") or "") != "cached":
+                saved_settings = persist_resolved_text_model(settings, resolution)
+                save_settings(saved_settings)
+                settings.update(saved_settings)
         effective_text_profile["timeout_seconds"] = text_timeout_limit
         if bool(effective_text_profile.get("has_api_key")) and not str(effective_text_profile.get("api_key") or "").strip():
             return _failure(state, store, "generating_article", ProviderError("TEXT_KEY_LOAD_FAILED", "已保存的文本密钥无法读取，请重新保存文本配置。"), "failed")
         state["model_info"] = {"text": _safe_model_info(effective_text_profile), "image": _safe_model_info(image_profile)}
         state["text_model_name"] = str(effective_text_profile.get("model") or effective_text_profile.get("name") or "")
+        state["configured_text_model_name"] = configured_text_model
+        state["resolved_text_model"] = state["text_model_name"]
+        state["resolved_model"] = state["text_model_name"]
+        state["resolved_text_base_url_hash"] = (state.get("model_resolution") or {}).get("base_url_hash") or ""
+        state["model_resolution_source"] = (state.get("model_resolution") or {}).get("model_resolution_source") or ""
         state.update({"status": "running", "stage": "collecting_research" if run_article else "generating_image_prompt", "progress": 5 if run_article else 55, "failed_step": None, "error_code": "", "safe_error_message": "", "next_retry_at": None})
         _persist(state, store)
         _check_cancel(task["task_id"])
@@ -1121,7 +1195,12 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
             used_fallback = False
             state["fallback_notice"] = ""
             generation_stats = {"text_generation_calls": 0, "text_generation_limit": 3, "text_generation_second_call_reason": "", "text_generation_call_reasons": []}
-            try:
+            article_generated = False
+            provider_exc: ProviderError | None = None
+            text_started = 0.0
+
+            def _generate_with_current_text_profile() -> dict[str, Any]:
+                nonlocal text_started
                 state["text_model_started_at"] = utc_now()
                 state["text_model_finished_at"] = None
                 state["provider_error_code"] = ""
@@ -1132,11 +1211,60 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                 state["text_max_tokens"] = 1400
                 text_started = time.perf_counter()
                 _persist(state, store)
-                article = generate_article(topic, angle, article_type, style, word_count, effective_text_profile, demo_mode=False, app_mode="production", network_settings=settings.get("network"), rewrite_context=rewrite_context, research_bundle=bundle, generation_stats=generation_stats)
+                return generate_article(topic, angle, article_type, style, word_count, effective_text_profile, demo_mode=False, app_mode="production", network_settings=settings.get("network"), rewrite_context=rewrite_context, research_bundle=bundle, generation_stats=generation_stats)
+
+            def _mark_text_success(started_at: float) -> None:
                 state["text_model_finished_at"] = utc_now()
                 state["text_generation_result"] = "success"
-                state["text_model_elapsed_seconds"] = round(time.perf_counter() - text_started, 1)
+                state["text_model_elapsed_seconds"] = round(time.perf_counter() - started_at, 1)
                 state["text_http_status"] = 200
+
+            try:
+                article = _generate_with_current_text_profile()
+                _mark_text_success(text_started)
+                article_generated = True
+            except ProviderError as exc:
+                provider_exc = exc
+                if str(exc.code) in INCOMPATIBLE_MODEL_ERRORS and not bool(state.get("text_model_auto_resolution_attempted")) and should_resolve_text_model:
+                    state["text_model_auto_resolution_attempted"] = True
+                    state["text_model_recovery_reason"] = str(exc.code)
+                    recovery_resolution = resolve_usable_text_model(
+                        settings,
+                        text_profile,
+                        network_settings=settings.get("network"),
+                        force_refresh=True,
+                        source="automatic_recovery",
+                    )
+                    recovery_profile = dict(recovery_resolution.get("profile") or {})
+                    recovery_profile["configured_model"] = configured_text_model
+                    recovery_resolution["profile"] = recovery_profile
+                    state["model_resolution_recovery"] = _text_resolution_state(recovery_resolution)
+                    if recovery_resolution.get("success"):
+                        saved_settings = persist_resolved_text_model(settings, recovery_resolution)
+                        save_settings(saved_settings)
+                        settings.update(saved_settings)
+                        effective_text_profile = dict(recovery_resolution.get("profile") or text_profile)
+                        effective_text_profile["timeout_seconds"] = text_timeout_limit
+                        state["model_info"] = {"text": _safe_model_info(effective_text_profile), "image": _safe_model_info(image_profile)}
+                        state["text_model_name"] = str(effective_text_profile.get("model") or effective_text_profile.get("name") or "")
+                        state["resolved_text_model"] = state["text_model_name"]
+                        state["resolved_model"] = state["text_model_name"]
+                        state["resolved_text_base_url_hash"] = str(recovery_resolution.get("base_url_hash") or "")
+                        state["model_resolution_source"] = str(recovery_resolution.get("model_resolution_source") or "automatic_recovery")
+                        _persist(state, store)
+                        try:
+                            article = _generate_with_current_text_profile()
+                            _mark_text_success(text_started)
+                            state["text_model_recovery_result"] = "success"
+                            article_generated = True
+                            provider_exc = None
+                        except ProviderError as retry_exc:
+                            state["text_model_recovery_result"] = "failed"
+                            provider_exc = retry_exc
+                    else:
+                        state["text_model_recovery_result"] = "failed"
+
+            if article_generated:
                 # ── R1.2: custom_topic short article auto-expand ──
                 if custom_topic_mode and not used_fallback:
                     body_chars = count_body_chinese_chars(article)
@@ -1151,13 +1279,14 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                     state["provider_error_code"] = "CONTENT_TOO_SHORT"
                     state["provider_error_message"] = str(article.get("warning_note") or "模型返回正文偏短，已保留原始可编辑正文。")
                     state["text_generation_result"] = "warning"
-            except ProviderError as exc:
+            elif provider_exc is not None:
+                exc = provider_exc
                 state["text_model_finished_at"] = utc_now()
                 state["text_model_elapsed_seconds"] = round(time.perf_counter() - text_started, 1)
                 state["provider_error_code"] = str(exc.code)
                 state["provider_error_message"] = redact_sensitive_text(str(getattr(exc, "detail", exc)))[:500]
                 state["text_http_status"] = int((getattr(exc, "details", {}) or {}).get("http_status") or 0)
-                if exc.code not in {"TIMEOUT", "TLS_ERROR", "ARTICLE_TOO_SHORT", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED", "ARTICLE_PARSE_ERROR", "MODEL_OUTPUT_EMPTY", "MODEL_OUTPUT_REASONING_ONLY", "PROVIDER_INTERNAL_ERROR"}:
+                if exc.code not in {"TIMEOUT", "TLS_ERROR", "ARTICLE_TOO_SHORT", "INVALID_RESPONSE", "MODEL_NOT_CONFIGURED", "MODEL_NOT_FOUND", "ARTICLE_PARSE_ERROR", "MODEL_OUTPUT_EMPTY", "MODEL_OUTPUT_REASONING_ONLY", "NO_USABLE_TEXT_MODEL", "MODEL_DISCOVERY_FAILED", "MODEL_CAPABILITY_PROBE_FAILED", "PROVIDER_INTERNAL_ERROR"}:
                     raise
                 used_fallback = True
                 state["text_generation_result"] = "fallback"
@@ -1188,6 +1317,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                     "error_code": provider_code,
                     "safe_error_message": retry_message,
                     "retryable": is_retryable_error(provider_code),
+                    "next_actions": ["test_text_model", "retry_article", "open_model_settings"],
                     "used_local_fallback": False,
                     "fallback_kind": "",
                     "image_usage": {"generation_calls": 0, "paid_calls": 0, "retry_calls": 0, "budget_exceeded": False},

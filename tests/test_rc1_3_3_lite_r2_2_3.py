@@ -76,10 +76,10 @@ def test_CURRENT_TEXT_KEY_OVERRIDES_SAVED_PASS(monkeypatch):
     assert seen["authorization"] == "Bearer TEXT-NEW-KEY"
 
 
-def test_TEXT_SECOND_DROPDOWN_MODEL_SAVE_PASS():
-    assert 'key="rc132_text_model_selected"' in APP_SOURCE
+def test_TEXT_AUTO_RESOLVED_MODEL_SAVE_PASS():
+    assert 'key="rc132_text_model_selected"' not in APP_SOURCE
     assert 'values.update({"model": final_text_model' in APP_SOURCE
-    assert 'return selected' in APP_SOURCE
+    assert 'settings.get("resolved_text_model")' in APP_SOURCE
 
 
 def test_IMAGE_SECOND_DROPDOWN_MODEL_SAVE_PASS():
@@ -89,7 +89,7 @@ def test_IMAGE_SECOND_DROPDOWN_MODEL_SAVE_PASS():
 
 
 def test_TEXT_MODEL_PERSISTS_AFTER_REOPEN_PASS():
-    assert "saved_text_model" in APP_SOURCE
+    assert "resolved_text_model" in APP_SOURCE
     assert 'st.session_state.setdefault(selected_key, saved_model)' in APP_SOURCE
     assert 'st.session_state.setdefault(manual_key, saved_model)' in APP_SOURCE
 
@@ -102,7 +102,7 @@ def test_IMAGE_MODEL_PERSISTS_AFTER_REOPEN_PASS():
 
 def test_MANUAL_MODEL_MODE_PASS():
     assert "手动填写模型名称" in APP_SOURCE
-    assert 'key="rc132_text_model_manual"' in APP_SOURCE
+    assert 'key="rc132_text_model_manual"' not in APP_SOURCE
     assert 'key="rc132_image_model_manual"' in APP_SOURCE
 
 

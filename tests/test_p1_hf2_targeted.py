@@ -83,7 +83,7 @@ def test_generation_failure_502_disables_retry_and_exposes_actions(monkeypatch):
 def test_settings_page_uses_scoped_keys_and_shared_key_sync_only():
     source = (ROOT / "ui" / "rc1_app.py").read_text(encoding="utf-8")
     assert 'key="rc132_text_save"' in source
-    assert 'key="rc132_text_discover"' in source
+    assert 'key="rc132_text_probe"' in source
     assert 'key="rc132_image_discover"' in source
     assert 'key=f"rc1_clear_topic_basket_{scope}"' in source
     assert 'image_values.update({"api_key": text_key or "***", "has_api_key": bool(text_key or image.get("has_api_key"))})' in source

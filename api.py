@@ -68,7 +68,8 @@ from providers.contracts import ModelTestResult
 from providers.errors import is_retryable_error
 from providers.image_provider import OpenAIImageProvider
 from providers.model_discovery import discover_models
-from providers.text_provider import OpenAITextProvider, ProviderError
+from providers.text_model_resolver import base_url_hash, model_test_result_from_resolution, persist_resolved_text_model, resolve_usable_text_model
+from providers.text_provider import ProviderError
 
 
 app = FastAPI(title="热点图文工作台 API", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
@@ -433,12 +434,58 @@ def _text_profile_is_verified(settings: dict[str, Any], profile: dict[str, Any])
     current_model = _normalized_text_value(profile.get("model"))
     current_base_url = _normalized_text_value(profile.get("base_url")).rstrip("/")
     current_endpoint = "/" + _normalized_text_value(profile.get("endpoint") or "/chat/completions").lstrip("/")
+    if (
+        _normalized_text_value(settings.get("resolved_text_capability_status")) == "verified"
+        and _normalized_text_value(settings.get("resolved_text_model"))
+        and _normalized_text_value(settings.get("resolved_text_provider")) == _normalized_text_value(profile.get("provider_id") or profile.get("name") or "openai_compatible_text")
+        and _normalized_text_value(settings.get("resolved_text_base_url_hash")) == base_url_hash(current_base_url, current_endpoint)
+    ):
+        return True
     return (
         current_model
         and current_model == _normalized_text_value(settings.get("verified_text_model"))
         and current_base_url == _normalized_text_value(settings.get("verified_text_base_url")).rstrip("/")
         and current_endpoint == ("/" + _normalized_text_value(settings.get("verified_text_endpoint") or "/chat/completions").lstrip("/"))
     )
+
+
+def _resolve_and_persist_text_model(settings: dict[str, Any], profile: dict[str, Any], *, force_refresh: bool, source: str) -> ModelTestResult:
+    resolution = resolve_usable_text_model(
+        settings,
+        profile,
+        network_settings=settings.get("network"),
+        force_refresh=force_refresh,
+        source=source,
+    )
+    result = model_test_result_from_resolution(resolution)
+    if result.success:
+        save_settings(persist_resolved_text_model(settings, resolution))
+    return result
+
+
+def _ensure_resolved_text_model(settings: dict[str, Any], *, force_refresh: bool = False, source: str = "task_start") -> dict[str, Any]:
+    resolution = resolve_usable_text_model(
+        settings,
+        dict(settings.get("text_profile") or {}),
+        network_settings=settings.get("network"),
+        force_refresh=force_refresh,
+        source=source,
+    )
+    if not resolution.get("success"):
+        code = str(resolution.get("error_code") or "NO_USABLE_TEXT_MODEL")
+        raise ProviderError(code, str(resolution.get("error_message") or user_facing_error_message(code, "文本模型不可用于正式正文生成。")), details=resolution)
+    saved_settings = persist_resolved_text_model(settings, resolution)
+    save_settings(saved_settings)
+    return saved_settings
+
+
+def _attach_resolved_text_model_option(options: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    resolved_model = _normalized_text_value(settings.get("resolved_text_model") or settings.get("verified_text_model"))
+    if resolved_model:
+        options["resolved_model"] = resolved_model
+        options["resolved_text_model"] = resolved_model
+        options["text_model_resolution_source"] = _normalized_text_value(settings.get("resolved_text_capability_status") or "verified")
+    return options
 
 
 @app.post("/api/models/text/test")
@@ -450,9 +497,7 @@ def test_text_model(payload: ModelTestRequest | None = None) -> JSONResponse:
     profile = _current_test_profile(dict(settings.get("text_profile") or {}), payload)
     if payload and payload.timeout_override:
         profile["timeout_seconds"] = payload.timeout_override
-    result = OpenAITextProvider(profile, network_settings=settings.get("network")).test_connection()
-    if result.success:
-        _persist_verified_text_profile(settings, profile, datetime.now(timezone.utc).isoformat())
+    result = _resolve_and_persist_text_model(settings, profile, force_refresh=True, source="configured_probe")
     return _response(result.success, result.to_dict(), _model_test_error(result), 200)
 
 
@@ -465,9 +510,7 @@ def compatibility_test_text_model(payload: ModelTestRequest | None = None) -> JS
     profile = _current_test_profile(dict(settings.get("text_profile") or {}), payload)
     if payload and payload.timeout_override:
         profile["timeout_seconds"] = payload.timeout_override
-    result = OpenAITextProvider(profile, network_settings=settings.get("network")).basic_connection_test()
-    if result.success:
-        _persist_verified_text_profile(settings, profile, datetime.now(timezone.utc).isoformat())
+    result = _resolve_and_persist_text_model(settings, profile, force_refresh=True, source="configured_probe")
     return _response(result.success, result.to_dict(), _model_test_error(result), 200)
 
 
@@ -482,9 +525,7 @@ def article_capability_test_text_model(payload: ModelTestRequest | None = None) 
     profile = _current_test_profile(dict(settings.get("text_profile") or {}), payload)
     if payload and payload.timeout_override:
         profile["timeout_seconds"] = payload.timeout_override
-    result = OpenAITextProvider(profile, network_settings=settings.get("network")).article_capability_test()
-    if result.success:
-        _persist_verified_text_profile(settings, profile, datetime.now(timezone.utc).isoformat())
+    result = _resolve_and_persist_text_model(settings, profile, force_refresh=True, source="configured_probe")
     return _response(result.success, result.to_dict(), _model_test_error(result), 200)
 
 
@@ -706,7 +747,9 @@ def create_task(payload: CreateTaskRequest) -> JSONResponse:
     if blocked:
         return blocked
     try:
-        task = service.create_task(payload.task_name, payload.mode, payload.topic_ids, payload.article_count, payload.generation_options.model_dump(exclude_none=True))
+        settings_snapshot = load_settings()
+        options = _attach_resolved_text_model_option(payload.generation_options.model_dump(exclude_none=True), settings_snapshot)
+        task = service.create_task(payload.task_name, payload.mode, payload.topic_ids, payload.article_count, options)
         return _response(True, task, None, 201)
     except ValueError as exc:
         commercial_details = _commercial_details_from_value_error(exc)
@@ -755,20 +798,7 @@ def _run_task_response(task_id: str, retry_step: str | None = None) -> JSONRespo
             if retry_step == "retry-cover" and state and not state.get("article"):
                 return _error("ARTICLE_NOT_AVAILABLE", "article result is missing", task_id, retryable=False, status_code=409)
             if retry_step != "retry-cover" and not _text_profile_is_verified(settings, settings.get("text_profile", {})):
-                current_profile = dict(settings.get("text_profile") or {})
-                return _error(
-                    "TEXT_MODEL_NOT_VERIFIED",
-                    "当前文本模型尚未测试。请先在“模型设置”中完成测试，再重新写文章。",
-                    {
-                        "model": _normalized_text_value(current_profile.get("model")),
-                        "base_url": _normalized_text_value(current_profile.get("base_url")),
-                        "endpoint": _normalized_text_value(current_profile.get("endpoint")),
-                        "verified_text_model": _normalized_text_value(settings.get("verified_text_model")),
-                        "verified_at": _normalized_text_value(settings.get("verified_at")),
-                    },
-                    retryable=False,
-                    status_code=409,
-                )
+                settings = _ensure_resolved_text_model(settings, force_refresh=False, source="task_start")
             prepared = prepare_generation_state(task, settings.get("text_profile", {}), settings.get("image_profile", {}), store=store)
             executor.submit(task_id, lambda: executor.execute_with_retry(task, settings.get("text_profile", {}), settings.get("image_profile", {}), settings, store, retry_step))
             return _response(True, prepared, None, 202)
@@ -1377,10 +1407,12 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
         else:
             raise ValueError("batch requires 1 to 5 topics")
         confirmed_paid = bool(payload.generation_options.confirm_paid)
+        settings_snapshot = load_settings()
         options = payload.generation_options.model_dump(exclude_none=True)
+        options = _attach_resolved_text_model_option(options, settings_snapshot)
         options["confirm_paid"] = confirmed_paid
         options["article_count"] = payload.article_count
-        image_mode = str(options.get("image_plan_mode") or load_settings().get("image_plan_mode") or "standard")
+        image_mode = str(options.get("image_plan_mode") or settings_snapshot.get("image_plan_mode") or "standard")
         if image_mode == "none":
             options["confirm_paid"] = False
         # RC1.3.3-Lite does not perform automatic image retries; a retry is always a new user-confirmed action.

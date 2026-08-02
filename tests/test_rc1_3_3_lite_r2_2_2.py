@@ -12,8 +12,8 @@ APP_SOURCE = Path("ui/rc1_app.py").read_text(encoding="utf-8")
 
 def test_TEXT_MODEL_DETECT_NO_SESSION_STATE_ERROR_PASS():
     assert 'st.session_state["rc132_text_model"] = ' not in APP_SOURCE
-    assert 'key="rc132_text_model_selected"' in APP_SOURCE
-    assert 'key="rc132_text_model_manual"' in APP_SOURCE
+    assert 'key="rc132_text_model_selected"' not in APP_SOURCE
+    assert 'key="rc132_text_model_manual"' not in APP_SOURCE
     assert "rc132_pending_text_model" in APP_SOURCE
 
 
@@ -25,9 +25,10 @@ def test_IMAGE_MODEL_DETECT_NO_SESSION_STATE_ERROR_PASS():
 
 
 def test_TEXT_MODEL_SELECT_AFTER_DETECT_PASS():
-    assert "rc132_text_model_options" in APP_SOURCE
-    assert "文本模型下拉列表" in APP_SOURCE
-    assert "已找到" in APP_SOURCE and "请选择要使用的模型" in APP_SOURCE
+    assert "测试文本接口" in APP_SOURCE
+    assert "/models/text/test" in APP_SOURCE
+    assert "已自动匹配正文模型" in APP_SOURCE
+    assert "文本模型下拉列表" not in APP_SOURCE
 
 
 def test_IMAGE_MODEL_SELECT_AFTER_DETECT_PASS():

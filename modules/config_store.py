@@ -62,6 +62,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "verified_text_endpoint": None,
     "verified_at": None,
     "last_text_model_test_at": None,
+    "resolved_text_model": None,
+    "resolved_text_provider": None,
+    "resolved_text_base_url_hash": None,
+    "resolved_text_verified_at": None,
+    "resolved_text_capability_status": "",
+    "resolved_text_parser_mode": "",
     "text_profile": _default_text_profile(),
     "image_profile": _default_image_profile(),
 }
@@ -187,6 +193,7 @@ def _has_plaintext_key(settings: dict[str, Any]) -> bool:
 
 def _settings_for_persistence(settings: dict[str, Any]) -> dict[str, Any]:
     persisted = _merge(DEFAULT_SETTINGS, json.loads(json.dumps(settings)))
+    preserve_text_resolution = bool(persisted.pop("_preserve_text_resolution_on_save", False))
     persisted.pop("credential_migration_error", None)
     persisted.pop("credential_available", None)
     current = {}
@@ -195,6 +202,14 @@ def _settings_for_persistence(settings: dict[str, Any]) -> dict[str, Any]:
             current = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             current = {}
+    text_resolution_invalidated = False
+    existing_text_profile = dict((current.get("text_profile") or {}) if isinstance(current.get("text_profile"), dict) else {})
+    new_text_profile = dict((persisted.get("text_profile") or {}) if isinstance(persisted.get("text_profile"), dict) else {})
+    for key in ("provider_id", "base_url", "endpoint", "auth_type", "auth_header"):
+        if str(existing_text_profile.get(key) or "").strip() != str(new_text_profile.get(key) or "").strip():
+            text_resolution_invalidated = True
+            break
+
     for profile_name in ("text_profile", "image_profile"):
         profile = dict(persisted.get(profile_name) or {})
         existing = dict((current.get(profile_name) or {}) if isinstance(current.get(profile_name), dict) else {})
@@ -205,6 +220,8 @@ def _settings_for_persistence(settings: dict[str, Any]) -> dict[str, Any]:
             profile["has_api_key"] = False
             credential_ref = ""
         elif key_value and key_value != "***":
+            if profile_name == "text_profile":
+                text_resolution_invalidated = True
             credential_ref = save_secret(f"{profile_name}_api_key", key_value)
             profile["has_api_key"] = True
         else:
@@ -212,7 +229,25 @@ def _settings_for_persistence(settings: dict[str, Any]) -> dict[str, Any]:
         profile["credential_ref"] = credential_ref if profile["has_api_key"] else ""
         profile.pop("api_key", None)
         persisted[profile_name] = profile
+    if text_resolution_invalidated and not preserve_text_resolution:
+        _clear_text_resolution_fields(persisted)
     return persisted
+
+
+def _clear_text_resolution_fields(settings: dict[str, Any]) -> None:
+    for key in (
+        "resolved_text_model",
+        "resolved_text_provider",
+        "resolved_text_base_url_hash",
+        "resolved_text_verified_at",
+        "resolved_text_capability_status",
+        "resolved_text_parser_mode",
+        "verified_text_model",
+        "verified_text_base_url",
+        "verified_text_endpoint",
+        "verified_at",
+    ):
+        settings[key] = "" if key.endswith(("status", "mode")) else None
 
 
 def _log_credential_failure(error: Exception, operation: str) -> None:

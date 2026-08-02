@@ -1616,24 +1616,15 @@ def _settings_page(settings: dict[str, Any], save_settings: Any, root: Path, res
             st.caption(f"已保存文本 Key：{_mask_api_key(str(text.get('api_key') or ''))}。保存后完整密钥不会回填显示。")
         text_base = st.text_input("文本 API 地址", value=str(text.get("base_url") or text_preset.get("base_url") or ""), key="rc132_text_base")
         text_endpoint = str(st.session_state.get("rc132_text_endpoint") or text.get("endpoint") or text_preset.get("endpoint") or "/chat/completions")
-        saved_text_model = str(text.get("model") or "")
-        text_model_options = model_options("text", str(st.session_state.get("rc132_text_model_selected") or saved_text_model))
-        text_model_mode = st.radio("文本模型选择方式", ["从检测结果中选择", "手动填写模型名称"], horizontal=True, key="rc132_text_model_mode", disabled=restricted)
-        if text_model_options:
-            text_model_selected = st.selectbox("文本模型下拉列表", text_model_options, index=text_model_options.index(str(st.session_state.get("rc132_text_model_selected") or saved_text_model)) if str(st.session_state.get("rc132_text_model_selected") or saved_text_model) in text_model_options else 0, key="rc132_text_model_selected", disabled=restricted or text_model_mode != "从检测结果中选择")
-        else:
-            st.info("点击“检测可用模型”后会显示文本模型列表；不支持 /models 时可在高级设置手动填写。")
-            text_model_selected = ""
         with st.expander("高级设置", expanded=False):
-            text_model_manual = st.text_input("手动填写文本模型名称", placeholder="例如服务商返回或中转平台提供的模型名", key="rc132_text_model_manual", disabled=restricted or text_model_mode != "手动填写模型名称")
             text_endpoint = st.text_input("文本 Endpoint", value=str(text_endpoint or "/chat/completions"), key="rc132_text_endpoint")
             text_timeout_options = [60, 120, 180, 300]
             saved_text_timeout = int(text.get("timeout_seconds") or 180)
             text_timeout = st.selectbox("生成超时", text_timeout_options, index=text_timeout_options.index(saved_text_timeout) if saved_text_timeout in text_timeout_options else 2, format_func=lambda value: f"{value}秒", key="rc132_text_timeout")
             text_est_cost = st.number_input("文本单次预估费用（元）", min_value=0.0, value=_safe_float(settings.get("text_estimated_cost_per_call"), 0.0), step=0.001, format="%.4f", key="rc132_text_est_cost", help="填写后会在生成前显示人民币估算")
-            st.caption("支持 OpenAI兼容接口、国内官方接口、API中转、自定义Base URL、自定义Endpoint、非预设模型名称。")
-        final_text_model = final_model_value("text")
-        text_save, text_discover = st.columns(2)
+            st.caption("支持 OpenAI兼容接口、国内官方接口、API中转、自定义Base URL 和自定义 Endpoint；正文模型会在测试和生成时自动匹配。")
+        final_text_model = str(settings.get("resolved_text_model") or text.get("model") or "")
+        text_save, text_probe = st.columns(2)
         if text_save.button("保存文本配置", type="primary", disabled=restricted, use_container_width=True, key="rc132_text_save"):
             values = profile_values("text", text, text_provider)
             values.update({"model": final_text_model, "base_url": text_base, "endpoint": text_endpoint, "timeout_seconds": int(st.session_state.get("rc132_text_timeout") or 180), "api_key": text_key or "***"})
@@ -1664,50 +1655,16 @@ def _settings_page(settings: dict[str, Any], save_settings: Any, root: Path, res
                         st.success(f"文本配置已安全保存。\\n\\n保存位置：{_config_dir()}")
             except Exception:
                 st.error("TEXT_CREDENTIAL_PATH_INVALID：配置保存路径异常，请重启软件后重试。")
-        if text_discover.button("检测可用模型", disabled=restricted, use_container_width=True, key="rc132_text_discover"):
+        if text_probe.button("测试文本接口", disabled=restricted, use_container_width=True, key="rc132_text_probe"):
             try:
-                result = _api("POST", "/models/text/discover", timeout=45, json={"profile_kind": "text", "use_for_both": shared, "profile": {"name": text_provider, "api_key": text_key, "base_url": text_base, "endpoint": text_endpoint}})
-                discovered_text = list(result.get("text_models") or [])
-                if not discovered_text:
-                    discovered_text = list(dict.fromkeys(list(result.get("other_models") or []) + list(result.get("image_models") or [])))
-                st.session_state["rc132_text_model_options"] = discovered_text
-                st.session_state["rc132_text_models"] = discovered_text
-                picked_text = str(result.get("recommended_text_model") or (discovered_text[0] if discovered_text else "") or "")
-                picked_image = str(result.get("recommended_image_model") or "")
-                if picked_text:
-                    st.session_state["rc132_pending_text_model"] = picked_text
-                    st.session_state["rc132_text_status"] = f"已找到 {len(discovered_text)} 个模型，请选择要使用的模型"
-                    if shared:
-                        st.session_state["rc132_pending_image_model"] = picked_image
-                    st.success(f"已找到 {len(discovered_text)} 个模型，请选择要使用的模型。推荐：{picked_text}")
-                    st.rerun()
-                else:
-                    st.session_state["rc132_text_status"] = "未自动识别模型"
-                    st.warning("未能自动识别文本模型。模型识别失败不代表接口不能使用，可在高级设置手动填写模型名称。")
-            except Exception as exc:
-                st.session_state["rc132_text_status"] = "检测失败，可手动配置"
-                st.error(_model_list_error_message(_api_error_text(exc)))
-        text_compat, text_article_test = st.columns(2)
-        if text_compat.button("基础连接检测", disabled=restricted or not final_text_model, use_container_width=True, key="rc132_text_compat"):
-            try:
-                result = _api("POST", "/models/text/compatibility-test", timeout=45, json={"timeout_override": 30, "profile": {"name": text_provider, "model": final_text_model, "api_key": text_key, "base_url": text_base, "endpoint": text_endpoint}})
-                st.session_state["rc132_text_status"] = "兼容性检测通过"
-                st.success("基础连接通过，不代表长文生成一定成功。")
-                _render_diagnostic_details(result, expander_label="查看本次连接诊断")
-            except Exception as exc:
-                st.session_state["rc132_text_status"] = "配置有误"
-                st.error(_model_error_message(exc))
-                _render_diagnostic_details(exc, expander_label="查看失败诊断")
-        long_text_confirmed = st.checkbox("我确认：本操作将真实调用文本模型生成约300字结构化内容，可能产生少量费用", key="rc132_confirm_text_article_capability", disabled=restricted)
-        if text_article_test.button("测试文章生成能力", disabled=restricted or not final_text_model or not long_text_confirmed, use_container_width=True, key="rc132_text_article_test"):
-            try:
-                result = _api("POST", "/models/text/article-capability-test", timeout=330, json={"timeout_override": int(st.session_state.get("rc132_text_timeout") or 180), "confirm_paid_test": True, "profile": {"name": text_provider, "model": final_text_model, "api_key": text_key, "base_url": text_base, "endpoint": text_endpoint}})
+                result = _api("POST", "/models/text/test", timeout=120, json={"timeout_override": int(st.session_state.get("rc132_text_timeout") or 180), "profile": {"name": text_provider, "model": final_text_model, "api_key": text_key, "base_url": text_base, "endpoint": text_endpoint}})
                 details = result.get("details") or {}
-                st.session_state["rc132_text_status"] = "文章生成能力测试通过"
-                st.success(f"文章生成能力测试通过。耗时：{int(result.get('elapsed_ms') or 0) / 1000:.1f}秒；返回结构：{'正常' if details.get('structure') == 'normal' else '已通过'}。")
-                _render_diagnostic_details(result, expander_label="查看本次文章测试诊断")
+                resolved = str(details.get("resolved_model") or result.get("model") or "")
+                st.session_state["rc132_text_status"] = "文本接口测试通过"
+                st.success(f"文本接口测试通过，已自动匹配正文模型：{resolved or '已验证'}。")
+                _render_diagnostic_details(result, expander_label="查看本次文本接口诊断")
             except Exception as exc:
-                st.session_state["rc132_text_status"] = "文章能力测试失败"
+                st.session_state["rc132_text_status"] = "文本接口测试失败"
                 st.error(_model_error_message(exc))
                 _render_diagnostic_details(exc, expander_label="查看失败诊断")
         text_clear_confirmed = st.checkbox("我确认清除已保存的文本 Key", key="rc132_confirm_clear_text_key", disabled=restricted or not text.get("has_api_key"))

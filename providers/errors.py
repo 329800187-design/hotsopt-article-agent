@@ -29,6 +29,9 @@ NON_RETRYABLE_ERROR_CODES = {
     "UNSUPPORTED_RESPONSE_FORMAT",
     "TASK_CANCELLED",
     "TEXT_MODEL_NOT_VERIFIED",
+    "NO_USABLE_TEXT_MODEL",
+    "MODEL_DISCOVERY_FAILED",
+    "MODEL_CAPABILITY_PROBE_FAILED",
     "ARTICLE_META_CONTENT_LEAK",
     "TOPIC-COMMERCIAL-FILTERED",
 }
@@ -72,6 +75,13 @@ USER_FACING_ERROR_MESSAGES = {
     "IMAGE_GENERATION_FAILED": "图片生成失败，文章正文已保留，请稍后重试图片。\n错误码：IMAGE_GENERATION_FAILED",
     "EXPORT_FAILED": "导出失败，请稍后重试。\n错误码：EXPORT_FAILED",
 }
+USER_FACING_ERROR_MESSAGES.update(
+    {
+        "NO_USABLE_TEXT_MODEL": "当前配置下没有找到可生成正式正文的模型。请检查访问地址和密钥，或更换可生成正文的文本服务。\n错误码：NO_USABLE_TEXT_MODEL",
+        "MODEL_DISCOVERY_FAILED": "模型列表读取失败，且当前配置下没有找到可生成正式正文的模型。\n错误码：MODEL_DISCOVERY_FAILED",
+        "MODEL_CAPABILITY_PROBE_FAILED": "模型连接可用，但没有通过正文生成能力探测。\n错误码：MODEL_CAPABILITY_PROBE_FAILED",
+    }
+)
 def user_facing_error_message(code: str, fallback: str = "") -> str:
     return USER_FACING_ERROR_MESSAGES.get(str(code), fallback or "网络连接异常")
 

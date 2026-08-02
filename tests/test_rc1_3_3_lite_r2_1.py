@@ -113,7 +113,7 @@ def test_CURRENT_TEXT_FORM_KEY_ACTUALLY_USED_PASS(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["authorization"] = request.headers.get("Authorization")
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "正文模型测试通过"}}]})
 
     monkeypatch.setattr(api, "load_settings", lambda: {"text_profile": {"api_key": "Key-A", "base_url": "https://mock.local/v1", "model": "old-model", "endpoint": "/chat/completions"}, "network": {}})
     monkeypatch.setattr(api, "save_settings", lambda _settings: None)
