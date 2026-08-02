@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -20,6 +22,35 @@ from hot_sources.service import HotTrendService
 from modules.database import SQLiteStore
 from modules.models import HotTopic
 from providers.text_provider import ProviderError
+
+
+def test_api_lifespan_schedules_recovery_without_blocking_health(monkeypatch: pytest.MonkeyPatch) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    monkeypatch.setenv("HOTSPOT_LOCAL_API_TOKEN", "x" * 43)
+    api._STARTUP_RECOVERY_THREAD = None
+
+    def slow_recovery(*args, **kwargs) -> dict:
+        started.set()
+        release.wait(5)
+        return {"recovered": [], "skipped": [], "recovery_failed": []}
+
+    monkeypatch.setattr(api, "recover_interrupted_tasks", slow_recovery)
+    monkeypatch.setattr(api.batch_executor, "recover_batches", lambda: {"recovered_batches": [], "skipped_batches": []})
+    start = time.monotonic()
+    try:
+        with TestClient(api.app) as client:
+            response = client.get("/api/health", headers={"X-Hotspot-Token": "x" * 43})
+            elapsed = time.monotonic() - start
+            assert response.status_code == 200
+            assert elapsed < 1.0
+            assert started.wait(1)
+            assert api._STARTUP_RECOVERY_THREAD is not None
+            assert api._STARTUP_RECOVERY_THREAD.is_alive()
+    finally:
+        release.set()
+        if api._STARTUP_RECOVERY_THREAD is not None:
+            api._STARTUP_RECOVERY_THREAD.join(timeout=2)
 
 
 def _topic(topic_id: str, title: str, summary: str = "公开资料显示事件正在发展", hot_value: str = "100") -> HotTopic:

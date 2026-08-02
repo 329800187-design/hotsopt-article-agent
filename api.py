@@ -8,6 +8,7 @@ import base64
 import hmac
 import json
 import shutil
+import threading
 import time
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
@@ -75,6 +76,8 @@ store = get_store()
 service = HotTrendService(load_settings(), store=store)
 executor = get_executor()
 batch_executor = get_batch_executor()
+_STARTUP_RECOVERY_LOCK = threading.Lock()
+_STARTUP_RECOVERY_THREAD: threading.Thread | None = None
 
 EXPORTABLE_ARTICLE_STATUSES = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
 
@@ -92,12 +95,34 @@ def _cleanup_stale_dedup_entries(now_ts: float, max_age: float = 15.0) -> None:
 
 @asynccontextmanager
 async def app_lifespan(application: FastAPI):
-    recover_interrupted_tasks(store=store, executor=executor)
-    batch_executor.recover_batches()
+    _schedule_startup_recovery()
     yield
 
 
 app.router.lifespan_context = app_lifespan
+
+
+def _run_startup_recovery() -> None:
+    try:
+        _logger.info("startup recovery: begin")
+        recover_interrupted_tasks(store=store, executor=executor)
+        batch_executor.recover_batches()
+        _logger.info("startup recovery: completed")
+    except Exception:
+        _logger.exception("startup recovery: failed")
+
+
+def _schedule_startup_recovery() -> None:
+    global _STARTUP_RECOVERY_THREAD
+    with _STARTUP_RECOVERY_LOCK:
+        if _STARTUP_RECOVERY_THREAD and _STARTUP_RECOVERY_THREAD.is_alive():
+            return
+        _STARTUP_RECOVERY_THREAD = threading.Thread(
+            target=_run_startup_recovery,
+            name="startup-recovery",
+            daemon=True,
+        )
+        _STARTUP_RECOVERY_THREAD.start()
 
 
 @app.middleware("http")

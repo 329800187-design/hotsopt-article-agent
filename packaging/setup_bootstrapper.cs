@@ -14,7 +14,7 @@ internal static class SetupBootstrapper
     private static readonly byte[] Marker = Encoding.UTF8.GetBytes("HOTSPOT_RC131_PAYLOAD\n");
     private const string ProductFolderName = "热点图文批量生产工作台";
     private const string DisplayName = "热点图文批量生产工作台";
-    private const string Version = "RC1.3.3-Lite-R2.2.10";
+    private const string Version = "RC1.3.3-Lite-R2.2.11";
     private const string Publisher = "热点图文工作台";
     private const string UninstallKeyName = "HotspotArticleAgent";
 
