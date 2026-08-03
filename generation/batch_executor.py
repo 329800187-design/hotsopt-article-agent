@@ -343,7 +343,7 @@ class BatchExecutor:
             if self._batch_starts.get(batch_id) is future:
                 self._batch_starts.pop(batch_id, None)
 
-    def start_batch_async(self, batch_id: str) -> dict[str, Any]:
+    def start_batch_async(self, batch_id: str, *, refresh: bool = True) -> dict[str, Any]:
         """Accept a batch immediately; research and task submission happen in the background."""
         with self._lock:
             batch = self.store.get_batch(batch_id)
@@ -356,7 +356,9 @@ class BatchExecutor:
                 future = self._batch_start_executor.submit(self._start_batch_worker, batch_id)
                 self._batch_starts[batch_id] = future
                 future.add_done_callback(lambda completed: self._forget_batch_start(batch_id, completed))
-            return self.store.refresh_batch(batch_id) or batch
+            # The interactive create endpoint only needs the persisted batch id.
+            # Refreshing here can contend with the worker's first research write.
+            return (self.store.refresh_batch(batch_id) or batch) if refresh else batch
 
     def start_batch(self, batch_id: str) -> dict[str, Any]:
         """Start synchronously for direct library callers and legacy integrations."""

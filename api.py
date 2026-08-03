@@ -1437,7 +1437,9 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
         batch = batch_executor.store.create_batch(payload.batch_name, payload.mode, topics, options, concurrency, angle_plans)
         batch_id = str(batch.get("batch_id") or "")
         try:
-            batch = batch_executor.start_batch_async(batch_id) or batch
+            # Return the persisted summary immediately so the UI can enter 我的内容
+            # while research and article generation continue in the worker thread.
+            batch = batch_executor.start_batch_async(batch_id, refresh=False) or batch
         except Exception:
             _logger.exception("create_batch: start_batch failed batch_id=%s", batch_id)
             # 把每个 task 的失败原因写回 generation state

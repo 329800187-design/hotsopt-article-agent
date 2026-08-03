@@ -68,6 +68,7 @@ PAGE_STUCK_SECONDS = 90  # No updated_at change for 90s => stuck
 def api_base() -> str:
     return f"http://127.0.0.1:{os.environ.get('HOTSPOT_API_PORT', '8506')}/api"
 NORMAL_PAGES = ["首页", "选择话题", "开始生成", "我的内容", "模型设置", "关于软件"]
+PAGE_MY_CONTENT = "我的内容"
 # Legacy audit marker for the five original customer navigation labels:
 # NORMAL_PAGES = ["首页", "选择话题", "开始生成", "我的内容", "模型设置"]
 STATUS_LABELS = {"queued": "等待生成", "running": "生成中", "retry_waiting": "准备重试", "completed": "已完成", "failed": "失败", "partial_success": "完成但建议核对", "cancelled": "已取消", "review_required": "完成但建议核对"}
@@ -805,7 +806,7 @@ def _render_batch_links_tab(service: Any) -> None:
                     "concurrency": 3,
                 })
                 st.session_state["rc1_last_created_batch_id"] = batch.get("batch_id")
-                _navigate_to("我的内容", focus_batch_id=str(batch.get("batch_id") or ""))
+                _navigate_to(PAGE_MY_CONTENT, focus_batch_id=str(batch.get("batch_id") or ""))
                 st.rerun()
             else:
                 st.error("没有成功抓取的链接，请稍后重试。")
@@ -984,7 +985,7 @@ def render_start(service: Any) -> None:
             st.session_state[last_submit_ts_key] = now_ts
             st.session_state[last_batch_id_key] = batch["batch_id"]
             st.success("已开始生成，可在「我的内容」查看进度。")
-            _navigate_to("我的内容", focus_batch_id=str(batch.get("batch_id") or ""))
+            _navigate_to(PAGE_MY_CONTENT, focus_batch_id=str(batch.get("batch_id") or ""))
             st.rerun()
         except Exception as exc:
             st.session_state[submitting_key] = False

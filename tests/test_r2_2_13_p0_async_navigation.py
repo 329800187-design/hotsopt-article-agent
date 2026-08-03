@@ -44,6 +44,21 @@ def test_start_batch_async_returns_before_background_work(tmp_path, monkeypatch)
     assert store.get_batch(batch["batch_id"]) is not None
 
 
+def test_start_batch_async_can_skip_refresh_for_interactive_create(tmp_path, monkeypatch):
+    store, batch = _batch(tmp_path)
+    executor = BatchExecutor(store)
+    refresh_calls = []
+
+    monkeypatch.setattr(executor, "_start_batch_worker", lambda batch_id: {})
+    original_refresh = store.refresh_batch
+    monkeypatch.setattr(store, "refresh_batch", lambda batch_id: refresh_calls.append(batch_id) or original_refresh(batch_id))
+
+    result = executor.start_batch_async(batch["batch_id"], refresh=False)
+
+    assert result["batch_id"] == batch["batch_id"]
+    assert refresh_calls == []
+
+
 def test_start_page_submits_one_async_start_call():
     source = Path("ui/rc1_app.py").read_text(encoding="utf-8")
     assert '"/batches/{batch[\'batch_id\']}/start"' not in source

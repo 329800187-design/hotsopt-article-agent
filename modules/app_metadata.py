@@ -9,7 +9,7 @@ PRODUCT_NAME = "热点图文批量生产工作台"
 APP_SHORT_NAME = "热点图文工作台"
 DATA_DIR_NAME = PRODUCT_NAME
 LICENSE_ADMIN_EXE_NAME = "热点图文工作台_本地许可证签发工具.exe"
-APP_VERSION = "RC1.3.3-Lite-R2.2.16"
+APP_VERSION = "RC1.3.3-Lite-R2.2.17"
 _BUILD_FILE = Path(__file__).with_name("build_metadata.json")
 try:
     _BUILD_DATA = json.loads(_BUILD_FILE.read_text(encoding="utf-8"))
