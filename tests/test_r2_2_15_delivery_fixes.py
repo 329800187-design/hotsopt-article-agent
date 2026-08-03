@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from hot_sources.platforms import normalize_topic_platform
+from hot_sources.toutiao_official import ToutiaoOfficialSource
 from modules.database import SQLiteStore
 from modules.models import HotTopic
 
@@ -29,6 +30,24 @@ def test_platform_metadata_keeps_source_platform_separate_from_channel():
     assert normalized.raw_data["acquisition_channel"] == "今日热榜"
     assert normalized.raw_data["aggregated_platforms"] == ["微博"]
     assert normalized.to_dict()["source_platform"] == "微博"
+
+
+def test_toutiao_public_endpoint_uses_current_query_path():
+    source = ToutiaoOfficialSource()
+    assert source.url == "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc"
+
+
+def test_toutiao_normalization_keeps_verified_platform_identity():
+    topic = ToutiaoOfficialSource().normalize_item(
+        {"QueryWord": "头条公开热点", "HotValue": "12345", "ClusterIdStr": "123"},
+        1,
+        "2026-08-03T00:00:00+00:00",
+    )
+    normalized = normalize_topic_platform(topic, ToutiaoOfficialSource())
+    assert normalized.source_name == "今日头条"
+    assert normalized.raw_data["source_platform"] == "今日头条"
+    assert normalized.raw_data["acquisition_channel"] == "直接接口"
+    assert normalized.raw_data["platform_rank"] == 1
 
 
 def _topics(count: int) -> list[dict]:

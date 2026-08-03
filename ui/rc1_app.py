@@ -642,7 +642,9 @@ def _render_title_input_tab(service: Any) -> None:
                 if topic_ids:
                     _api("POST", "/topics/basket", json={"topic_ids": topic_ids})
                     st.session_state["rc1_preferred_article_count"] = int(article_count)
-                    st.success("已加入 1 个话题。")
+                    # Keep the custom-input flow on the shared generation page;
+                    # title-only submissions must not fall through to 首页.
+                    _navigate_to("开始生成")
                     st.rerun()
                 else:
                     st.error("加入选题篮失败，请稍后重试。")

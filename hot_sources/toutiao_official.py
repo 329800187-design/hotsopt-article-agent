@@ -17,7 +17,9 @@ class ToutiaoOfficialSource(HotProvider):
     provider_name = "toutiao_official"
     display_name = "今日头条官方热榜"
 
-    def __init__(self, url: str = "https://www.toutiao.com/hot-event/hot-board/origin=toutiao_pc", timeout_seconds: int = 15, network_settings: dict[str, Any] | None = None) -> None:
+    # The public homepage calls this JSON endpoint with a query separator. The
+    # old path without '?' now returns 404.
+    def __init__(self, url: str = "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc", timeout_seconds: int = 15, network_settings: dict[str, Any] | None = None) -> None:
         super().__init__()
         self.url = url
         self.timeout_seconds = timeout_seconds

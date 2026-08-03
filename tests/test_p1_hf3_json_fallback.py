@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import time
 from pathlib import Path
 
@@ -19,20 +18,6 @@ TOPIC_TITLE = "\u70ed\u70b9\u751f\u6210\u6d4b\u8bd5"
 TOPIC_SUMMARY = "\u516c\u5f00\u8d44\u6599\u663e\u793a\u4e8b\u4ef6\u4ecd\u5728\u53d1\u5c55\uff0c\u9700\u8981\u57fa\u4e8e\u73b0\u6709\u6765\u6e90\u6574\u7406\u6587\u7ae0\u3002"
 FORMAT_WARNING = "\u6587\u7ae0\u5df2\u751f\u6210\uff0c\u4f46\u6a21\u578b\u8fd4\u56de\u683c\u5f0f\u4e0d\u6807\u51c6\uff0c\u5df2\u81ea\u52a8\u8f6c\u6362\u4e3a\u53ef\u7f16\u8f91\u6587\u7ae0\u3002"
 LOCAL_DRAFT_NOTICE = "\u5df2\u751f\u6210\u57fa\u7840\u7a3f\n\u5f53\u524d\u6a21\u578b\u8fd4\u56de\u5f02\u5e38\uff0c\u8f6f\u4ef6\u5df2\u6839\u636e\u516c\u5f00\u8d44\u6599\u751f\u6210\u53ef\u7f16\u8f91\u7248\u672c\u3002"
-
-
-ROOT = Path(__file__).resolve().parents[1]
-CASE_ROOT = ROOT / ".hf3_manual"
-
-
-@pytest.fixture(autouse=True)
-def signed_test_license():
-    yield
-
-
-@pytest.fixture
-def tmp_path() -> Path:
-    return CASE_ROOT
 
 
 def _paragraph(seed: str = "\u516c\u5f00\u8d44\u6599") -> str:
