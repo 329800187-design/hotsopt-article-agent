@@ -324,8 +324,9 @@ class SQLiteStore:
         if not 1 <= int(concurrency) <= 5:
             raise ValueError("批次并发数必须在 1 到 3 之间")
         if mode == "multi_topic":
-            if not 1 <= len(safe_topics) <= 5:
-                raise ValueError("批次必须包含 1 到 5 个话题")
+            max_topics = 20 if bool(safe_options.get("url_batch")) else 5
+            if not 1 <= len(safe_topics) <= max_topics:
+                raise ValueError(f"批次必须包含 1 到 {max_topics} 个话题")
             topic_keys = [str(item.get("id") or item.get("title") or "") for item in safe_topics]
             if any(not key for key in topic_keys) or len(set(topic_keys)) != len(topic_keys):
                 raise ValueError("同一批次不允许重复话题")

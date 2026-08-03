@@ -263,8 +263,24 @@ def _mask_api_key(value: str) -> str:
     return f"{key[:3]}****{key[-4:]}"
 
 
-def _navigate_to(label: str) -> None:
-    st.session_state["rc1_navigation_target"] = label
+_NAVIGATION_OPTIONS = {
+    "首页": "⌂ 首页",
+    "选择话题": "◈ 选择话题",
+    "开始生成": "＋ 开始生成",
+    "我的内容": "▣ 我的内容",
+    "模型设置": "⚙ 模型设置",
+    "关于软件": "ⓘ 关于软件",
+}
+
+
+def _navigate_to(label: str, *, focus_task_id: str | None = None, focus_batch_id: str | None = None) -> None:
+    normalized = str(label or "").strip()
+    page = next((name for name, option in _NAVIGATION_OPTIONS.items() if normalized in {name, option}), normalized)
+    st.session_state["rc1_navigation_target"] = _NAVIGATION_OPTIONS.get(page, _NAVIGATION_OPTIONS["首页"])
+    if focus_task_id:
+        st.session_state["rc1_focus_task_id"] = str(focus_task_id)
+    if focus_batch_id:
+        st.session_state["rc1_focus_batch_id"] = str(focus_batch_id)
 
 
 def _download(path: str, filename: str, label: str, key: str) -> None:
@@ -442,7 +458,8 @@ def _render_hotspot_tab(service: Any) -> None:
     with filter_cols[1]:
         category = st.selectbox("分类筛选", ["全部"] + sorted({str(item.get("category") or "综合热点") for item in topics}), key="rc1_hotspot_category")
     with filter_cols[2]:
-        source = st.selectbox("平台来源", ["全部"] + sorted({str(item.get("source_name") or item.get("source") or "未知来源") for item in topics}), key="rc1_hotspot_source")
+        platform_values = {str(platform) for item in topics for platform in (item.get("aggregated_platforms") or [item.get("source_platform") or item.get("source_name") or item.get("source") or "其他来源"])}
+        source = st.selectbox("平台来源", ["全部"] + sorted(platform_values), key="rc1_hotspot_source")
     with filter_cols[3]:
         sort_option = st.selectbox("排序方式", ["排名排序", "热度排序", "最新更新"], key="rc1_hotspot_sort")
     sort_map = {"排名排序": "rank_asc", "热度排序": "hot_desc"}
@@ -457,7 +474,7 @@ def _render_hotspot_tab(service: Any) -> None:
     if category != "全部":
         filtered = [item for item in filtered if str(item.get("category", "")) == category]
     if source != "全部":
-        filtered = [item for item in filtered if str(item.get("source_name") or item.get("source") or "未知来源") == source]
+        filtered = [item for item in filtered if source in {str(value) for value in (item.get("aggregated_platforms") or [item.get("source_platform") or item.get("source_name") or item.get("source") or "其他来源"])}]
     if sort_option == "排名排序":
         filtered = sorted(filtered, key=lambda x: int(x.get("rank") or 99999))
     elif sort_option == "热度排序":
@@ -501,11 +518,13 @@ def _render_hotspot_tab(service: Any) -> None:
         rank = item.get("rank") or "—"
         title = item.get("title") or "未命名热点"
         cat = item.get("category") or "综合热点"
-        source_label = item.get("source_name") or item.get("source") or "未知来源"
+        source_platforms = item.get("aggregated_platforms") or [item.get("source_platform") or item.get("source_name") or item.get("source") or "其他来源"]
+        source_label = "｜".join(str(value) for value in source_platforms if str(value).strip())
+        source_count = int(item.get("source_count") or len(source_platforms) or 1)
         hot_val = item.get("hot_value") or "—"
         st.markdown(
             f'<div class="rc1-card"><div class="rc1-card-title">🏷 #{rank}　{title}</div>'
-            f'<div class="rc1-stage">📂 {cat} · 📰 {source_label} · 🔥 热度 {hot_val}</div></div>',
+            f'<div class="rc1-stage">📂 {cat} · 📰 {source_label} · {source_count}个平台讨论 · 🔥 热度 {hot_val}</div></div>',
             unsafe_allow_html=True
         )
         action_left, action_right = st.columns([1, 1])
@@ -760,27 +779,34 @@ def _render_batch_links_tab(service: Any) -> None:
     ]
     if ready_links and st.button("加入已抓取链接", type="primary", key="rc1_links_submit"):
         try:
-            topic_ids: list[str] = []
+            link_topics: list[dict[str, Any]] = []
             for url in ready_links:
                 state = st.session_state[link_states_key].get(url, {})
-                result = _api(
-                    "POST",
-                    "/topics/manual",
-                    json={
-                        "title": str(state.get("title") or "")[:300],
-                        "summary": str(state.get("content") or "")[:5000],
-                        "reference_url": url,
-                    },
-                )
-                tid = str(result.get("id") or result.get("topic_id") or "")
-                if tid:
-                    topic_ids.append(tid)
-            if topic_ids:
-                _api("POST", "/topics/basket", json={"topic_ids": topic_ids})
-                st.success(f"已加入 {len(topic_ids)} 个链接话题。")
+                link_topics.append({
+                    "id": hashlib.sha1(url.encode("utf-8")).hexdigest()[:16],
+                    "title": str(state.get("title") or "")[:300],
+                    "summary": str(state.get("content") or "")[:5000],
+                    "source_url": url,
+                    "reference_url": url,
+                    "source_name": "网页链接",
+                    "source_platform": "其他来源",
+                    "category": "综合热点",
+                    "rank": len(link_topics) + 1,
+                })
+            if link_topics:
+                batch = _api("POST", "/batches", json={
+                    "batch_name": f"链接批量创作_{datetime.now():%m%d_%H%M}",
+                    "mode": "multi_topic",
+                    "topics": link_topics,
+                    "article_count": 1,
+                    "generation_options": {"image_plan_mode": "none", "confirm_paid": False},
+                    "concurrency": 3,
+                })
+                st.session_state["rc1_last_created_batch_id"] = batch.get("batch_id")
+                _navigate_to("我的内容", focus_batch_id=str(batch.get("batch_id") or ""))
                 st.rerun()
             else:
-                st.error("加入选题篮失败，请稍后重试。")
+                st.error("没有成功抓取的链接，请稍后重试。")
         except Exception as exc:
             _log_error("LINK-BATCH-001", exc, page="选择话题", action="submit_links")
             st.error("批量链接处理失败，请稍后重试。\n错误码：LINK-BATCH-001")
@@ -925,7 +951,7 @@ def render_start(service: Any) -> None:
                 st.info("任务已创建，请到「我的内容」查看。")
                 batch_id = st.session_state.get(last_batch_id_key)
                 if batch_id:
-                    _navigate_to("📋 我的内容")
+                    _navigate_to("我的内容", focus_batch_id=str(batch_id))
                     st.rerun()
                 return
         st.session_state[submitting_key] = True
@@ -956,7 +982,7 @@ def render_start(service: Any) -> None:
             st.session_state[last_submit_ts_key] = now_ts
             st.session_state[last_batch_id_key] = batch["batch_id"]
             st.success("已开始生成，可在「我的内容」查看进度。")
-            _navigate_to("📋 我的内容")
+            _navigate_to("我的内容", focus_batch_id=str(batch.get("batch_id") or ""))
             st.rerun()
         except Exception as exc:
             st.session_state[submitting_key] = False
@@ -1208,6 +1234,12 @@ def _content(restricted: bool = False) -> None:
             if st.button("重新加载", key="rc1_content_retry"):
                 st.rerun()
     batches = batch_payload.get("items", [])
+    focus_batch_id = str(st.session_state.pop("rc1_focus_batch_id", "") or "")
+    focus_task_id = str(st.session_state.pop("rc1_focus_task_id", "") or "")
+    if focus_batch_id:
+        batches = sorted(batches, key=lambda item: str(item.get("batch_id") or "") == focus_batch_id, reverse=True)
+    if focus_task_id:
+        st.session_state["rc1_content_detail_task_id"] = focus_task_id
     item_errors = batch_payload.get("item_errors") or []
     if item_errors:
         st.warning("部分历史记录暂时无法刷新，已先显示可读取内容。")
@@ -2106,10 +2138,12 @@ def render_rc1_app(settings: dict[str, Any], save_settings: Any, service: Any, r
         st.markdown("---")
     st.title("热点图文工作台")
     st.caption("选热点 → 选角度 → 开始生成 → 在我的内容中查看")
+    navigation_options = list(_NAVIGATION_OPTIONS.values())
     target = st.session_state.pop("rc1_navigation_target", None)
-    if target:
+    if target in navigation_options:
         st.session_state["rc1_navigation"] = target
-    page = st.sidebar.radio("导航", [f"⌂ {NORMAL_PAGES[0]}", f"◈ {NORMAL_PAGES[1]}", f"＋ {NORMAL_PAGES[2]}", f"▣ {NORMAL_PAGES[3]}", f"⚙ {NORMAL_PAGES[4]}", f"ⓘ {NORMAL_PAGES[5]}"], key="rc1_navigation")
+    st.session_state.setdefault("rc1_navigation", navigation_options[0])
+    page = st.sidebar.radio("导航", navigation_options, key="rc1_navigation")
     page = page.split(" ", 1)[-1]
     if page == "首页":
         page_header("热点图文工作台", "从热点到完整图文", "选择主题、配置风格，一次完成文章、封面、正文配图和导出")
@@ -2142,7 +2176,7 @@ def render_rc1_app(settings: dict[str, Any], save_settings: Any, service: Any, r
                 st.rerun()
         with home_cols[2]:
             st.markdown("### 🔗 批量链接")
-            st.caption("粘贴 1～5 个网页链接，批量生成文章。")
+            st.caption("粘贴 1～20 个网页链接，批量生成文章。")
             if st.button("从链接开始创作", type="primary", use_container_width=True, key="home_links"):
                 _navigate_to("◈ 选择话题")
                 st.rerun()

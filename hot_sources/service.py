@@ -15,6 +15,7 @@ from hot_sources.newsnow import NewsNowSource
 from hot_sources.registry import get_daily_source
 from hot_sources.toutiao_official import ToutiaoOfficialSource
 from hot_sources.tophub import TopHubOverviewSource, TopHubToutiaoSource
+from hot_sources.platforms import normalize_topic_platform
 from modules.database import DB_PATH, SQLiteStore, get_store
 from modules.models import HotTopic, utc_now
 from modules.topic_cache import TopicCacheStore, get_default_cache_store
@@ -121,7 +122,7 @@ class HotTrendService:
                 for topic in topics:
                     topic.provider_status = "online"
                     topic.is_cached = False
-                    topic.source_name = provider.display_name
+                    normalize_topic_platform(topic, provider)
                     topic.updated_at = utc_now()
                 self.store.save_provider_status(provider.provider_name, provider.display_name, "online", provider.last_success_at, None)
                 merged_topics.extend(topics)

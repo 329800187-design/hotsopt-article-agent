@@ -69,6 +69,8 @@ from providers.errors import is_retryable_error
 from providers.image_provider import OpenAIImageProvider
 from providers.model_discovery import discover_models
 from providers.text_model_resolver import base_url_hash, model_test_result_from_resolution, persist_resolved_text_model, resolve_usable_text_model
+
+MAX_BATCH_URLS = 20
 from providers.text_provider import ProviderError
 
 
@@ -204,7 +206,7 @@ class CreateBatchRequest(BaseModel):
     batch_name: str = Field(min_length=1, max_length=100)
     mode: Literal["multi_topic", "single_topic_multi_angle"] = "multi_topic"
     topic_ids: list[str] | None = Field(default=None, min_length=1, max_length=5)
-    topics: list[dict[str, Any]] | None = Field(default=None, min_length=1, max_length=5)
+    topics: list[dict[str, Any]] | None = Field(default=None, min_length=1, max_length=MAX_BATCH_URLS)
     article_count: int = Field(default=1, ge=1, le=5)
     angles: list[str] | None = Field(default=None, min_length=1, max_length=5)
     generation_options: GenerationOptions = Field(default_factory=GenerationOptions)
@@ -742,8 +744,9 @@ def create_task(payload: CreateTaskRequest) -> JSONResponse:
     if payload.mode == "multi_topic" and payload.article_count != 1:
         return _error("TOTAL_ARTICLE_LIMIT", "多热点模式每个热点只能生成1篇。", None, retryable=False, status_code=400)
     total_articles = payload.article_count if payload.mode == "single_topic_multi_angle" else len(payload.topic_ids)
-    if total_articles > 5:
-        return _error("TOTAL_ARTICLE_LIMIT", "一次最多生成5篇文章。", None, retryable=False, status_code=400)
+    max_articles = 5
+    if total_articles > max_articles:
+        return _error("TOTAL_ARTICLE_LIMIT", f"一次最多生成{max_articles}篇文章。", None, retryable=False, status_code=400)
     blocked = _license_gate()
     if blocked:
         return blocked
@@ -1390,8 +1393,10 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
     if payload.mode == "multi_topic" and payload.article_count != 1:
         return _error("TOTAL_ARTICLE_LIMIT", "多热点模式每个热点只能生成1篇。", None, retryable=False, status_code=400)
     total_articles = payload.article_count if payload.mode == "single_topic_multi_angle" else len(requested_topics)
-    if total_articles > 5:
-        return _error("TOTAL_ARTICLE_LIMIT", "一次最多生成5篇文章。", None, retryable=False, status_code=400)
+    is_url_batch = bool(payload.topics and all(isinstance(topic, dict) and str(topic.get("source_url") or topic.get("reference_url") or "").strip() for topic in payload.topics))
+    max_articles = MAX_BATCH_URLS if payload.mode == "multi_topic" and is_url_batch else 5
+    if total_articles > max_articles:
+        return _error("TOTAL_ARTICLE_LIMIT", f"一次最多生成{max_articles}篇文章。", None, retryable=False, status_code=400)
     blocked = _license_gate()
     if blocked:
         return blocked
@@ -1400,6 +1405,10 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
             topics = [topic.to_dict() for topic in service.select_topics(payload.topic_ids)]
         elif payload.topics:
             topics = sanitize_sensitive_data(payload.topics)
+            if len(topics) > MAX_BATCH_URLS:
+                return _error("URL_BATCH_LIMIT", "每批最多支持20个链接，请分批处理。", None, retryable=False, status_code=400)
+            if any(not isinstance(topic, dict) or not str(topic.get("id") or "").strip() for topic in topics):
+                return _error("URL_BATCH_INVALID_TOPIC", "批量链接中存在无效任务。", None, retryable=False, status_code=400)
             for topic in topics:
                 if isinstance(topic, dict):
                     blocked_details = _blocked_topic_details(topic)
@@ -1412,6 +1421,8 @@ def create_batch(payload: CreateBatchRequest) -> JSONResponse:
         options = payload.generation_options.model_dump(exclude_none=True)
         options = _attach_resolved_text_model_option(options, settings_snapshot)
         options["confirm_paid"] = confirmed_paid
+        if is_url_batch:
+            options["url_batch"] = True
         options["article_count"] = payload.article_count
         image_mode = str(options.get("image_plan_mode") or settings_snapshot.get("image_plan_mode") or "standard")
         if image_mode == "none":

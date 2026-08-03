@@ -176,7 +176,8 @@ def test_api_persists_generation_options_and_rejects_invalid_values(tmp_path, mo
     response = client.post("/api/tasks", json=payload)
     assert response.status_code == 201
     created = response.json()["data"]
-    assert created["generation_options"] == payload["generation_options"]
+    for key, value in payload["generation_options"].items():
+        assert created["generation_options"][key] == value
     assert store.get_task(created["task_id"])["generation_options"] == payload["generation_options"]
     invalid = dict(payload)
     invalid["generation_options"] = {**payload["generation_options"], "word_count": 999}

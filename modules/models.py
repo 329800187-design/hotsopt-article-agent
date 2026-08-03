@@ -38,6 +38,12 @@ class HotTopic:
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        raw = value.get("raw_data") if isinstance(value.get("raw_data"), dict) else {}
+        value["source_platform"] = str(raw.get("source_platform") or value.get("source_name") or "其他来源")
+        value["acquisition_channel"] = str(raw.get("acquisition_channel") or "其他渠道")
+        value["aggregated_platforms"] = list(raw.get("aggregated_platforms") or [value["source_platform"]])
+        value["source_count"] = int(raw.get("source_count") or len(value["aggregated_platforms"]))
+        value["platform_rank"] = int(raw.get("platform_rank") or value.get("rank") or 0)
         value["url"] = self.source_url
         value["collected_at"] = self.captured_at
         return value

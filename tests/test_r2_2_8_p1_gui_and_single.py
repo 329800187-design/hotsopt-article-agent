@@ -39,7 +39,7 @@ def test_THREE_TOPIC_ENTRY_DEFAULTS_INITIALIZED_BEFORE_WIDGETS_PASS():
     assert defaults < tabs
     assert 'st.session_state.setdefault("rc1_link_states", {})' in ui
     assert "请输入标题、话题或链接。" in ui
-    assert "粘贴 1～5 个网页链接" in ui
+    assert "粘贴 1～20 个网页链接" in ui
 
 
 def test_SINGLE_TITLE_CREATES_ONE_TOPIC_NOT_ANGLE_DUPLICATES_PASS():

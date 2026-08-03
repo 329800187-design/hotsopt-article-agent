@@ -21,6 +21,13 @@ def deduplicate_topics(topics: list[HotTopic], threshold: float = 0.9) -> list[H
         if not normalized:
             continue
         if any(SequenceMatcher(None, normalized, _normalize(existing.title)).ratio() >= threshold for existing in result):
+            existing = next(existing for existing in result if SequenceMatcher(None, normalized, _normalize(existing.title)).ratio() >= threshold)
+            existing_raw = dict(existing.raw_data or {})
+            incoming_raw = dict(topic.raw_data or {})
+            platforms = list(dict.fromkeys(list(existing_raw.get("aggregated_platforms") or []) + list(incoming_raw.get("aggregated_platforms") or []) + [str(incoming_raw.get("source_platform") or "").strip()]))
+            platforms = [item for item in platforms if item]
+            existing_raw.update({"aggregated_platforms": platforms, "source_count": len(platforms)})
+            existing.raw_data = existing_raw
             continue
         result.append(topic)
     return result
