@@ -984,6 +984,7 @@ def render_start(service: Any) -> None:
             st.session_state[request_id_key] = client_request_id
             st.session_state[last_submit_ts_key] = now_ts
             st.session_state[last_batch_id_key] = batch["batch_id"]
+            st.session_state["rc1_pending_created_batch"] = batch
             st.success("已开始生成，可在「我的内容」查看进度。")
             _navigate_to(PAGE_MY_CONTENT, focus_batch_id=str(batch.get("batch_id") or ""))
             st.rerun()
@@ -1228,14 +1229,20 @@ def _render_standalone_tasks(tasks: list[dict[str, Any]], restricted: bool) -> N
 def _content(restricted: bool = False) -> None:
     page_header("03 / 结果", "我的内容", "文章、封面、正文图片和历史版本都保存在本机")
     batch_payload: dict[str, Any] = {"items": [], "count": 0, "item_errors": []}
-    with st.spinner("正在加载内容列表…"):
-        try:
-            batch_payload = _api("GET", "/batches?limit=20&refresh=false", timeout=6)
-        except Exception as exc:
-            _log_error("CONTENT-LIST-001", exc, page="我的内容", action="load_batches")
-            st.warning(f"批次列表暂时无法读取：{_api_error_text(exc) or '服务响应异常'}")
-            if st.button("重新加载", key="rc1_content_retry"):
-                st.rerun()
+    pending_batch = st.session_state.pop("rc1_pending_created_batch", None)
+    if isinstance(pending_batch, dict) and pending_batch.get("batch_id"):
+        # Show the just-created lightweight summary immediately; the historical
+        # list can load on the next navigation without blocking this P0 handoff.
+        batch_payload = {"items": [pending_batch], "count": 1, "item_errors": []}
+    else:
+        with st.spinner("正在加载内容列表…"):
+            try:
+                batch_payload = _api("GET", "/batches?limit=20&refresh=false", timeout=6)
+            except Exception as exc:
+                _log_error("CONTENT-LIST-001", exc, page="我的内容", action="load_batches")
+                st.warning(f"批次列表暂时无法读取：{_api_error_text(exc) or '服务响应异常'}")
+                if st.button("重新加载", key="rc1_content_retry"):
+                    st.rerun()
     batches = batch_payload.get("items", [])
     focus_batch_id = str(st.session_state.pop("rc1_focus_batch_id", "") or "")
     focus_task_id = str(st.session_state.pop("rc1_focus_task_id", "") or "")

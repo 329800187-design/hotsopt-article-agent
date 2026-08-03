@@ -62,5 +62,7 @@ def test_start_batch_async_can_skip_refresh_for_interactive_create(tmp_path, mon
 def test_start_page_submits_one_async_start_call():
     source = Path("ui/rc1_app.py").read_text(encoding="utf-8")
     assert '"/batches/{batch[\'batch_id\']}/start"' not in source
+    assert 'st.session_state["rc1_pending_created_batch"] = batch' in source
+    assert 'pending_batch = st.session_state.pop("rc1_pending_created_batch", None)' in source
     assert 'st.session_state["rc1_content_detail_task_id"]' in source
     assert "轻量摘要" in source
