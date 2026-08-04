@@ -44,6 +44,19 @@ def completed_image_items(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in _image_items(state) if item.get("status") == "completed" and (item.get("path") or item.get("file_path"))]
 
 
+def sync_article_images(state: dict[str, Any]) -> dict[str, Any]:
+    """Keep the customer-visible article aligned with persisted image slots."""
+    article = dict(state.get("article") or {})
+    images = completed_image_items(state)
+    if images:
+        article["images"] = [dict(item) for item in images]
+        cover = next((item for item in images if item.get("role") == "cover"), None)
+        if cover:
+            article["cover"] = dict(cover)
+    state["article"] = article
+    return state
+
+
 def set_workflow_state(state: dict[str, Any], value: str, *, at: str | None = None) -> dict[str, Any]:
     if value not in WORKFLOW_STATES:
         raise ValueError(f"unknown workflow state: {value}")
@@ -112,6 +125,7 @@ def finish_image_generation(state: dict[str, Any]) -> dict[str, Any]:
 
 def confirm_images(state: dict[str, Any], image_ids: Iterable[str] | None = None) -> dict[str, Any]:
     require_workflow(state, ("images_pending_confirmation", "fusion_pending"), "IMAGE_CONFIRMATION_REQUIRED")
+    sync_article_images(state)
     available = completed_image_items(state)
     selected = {str(item) for item in (image_ids or []) if str(item).strip()}
     if selected:
@@ -127,6 +141,7 @@ def confirm_images(state: dict[str, Any], image_ids: Iterable[str] | None = None
 
 def prepare_fusion(state: dict[str, Any]) -> dict[str, Any]:
     require_workflow(state, ("fusion_pending", "final_draft_pending_preview", "final_draft_confirmed", "export_ready"), "FUSION_CONFIRMATION_REQUIRED")
+    sync_article_images(state)
     state["fusion_status"] = {"status": "preview_ready", "prepared_at": _now(), "model_calls": 0}
     set_workflow_state(state, "final_draft_pending_preview")
     return state

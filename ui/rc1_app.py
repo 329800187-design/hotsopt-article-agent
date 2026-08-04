@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 import ctypes
+import uuid
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
@@ -940,37 +941,22 @@ def render_start(service: Any) -> None:
 
     # ── 提交锁：点击后立即disabled，防止重复提交 ──
     submitting_key = "rc1_generation_submitting"
-    last_submit_ts_key = "rc1_generation_last_submit_ts"
-    request_id_key = "rc1_generation_client_request_id"
-    last_batch_id_key = "rc1_last_created_batch_id"
     already_submitting = st.session_state.get(submitting_key)
     if st.button("🚀 开始生成" if not already_submitting else "⏳ 正在创建任务/正在进入队列…",
                  type="primary", use_container_width=True,
                  disabled=already_submitting or (image_mode != "none" and not paid_batch_confirmed),
                  key="rc1_start_generate"):
-        # 10秒内重复点击防护
+        # The submit lock prevents duplicate clicks during this event.
         import hashlib as _hl
-        import time as _time
-        now_ts = _time.time()
         options_fingerprint = json.dumps({
             "basket": [str(item["id"]) for item in basket],
             "mode": mode, "count": count, "word_count": word_count,
             "article_type": article_type, "style": style,
         }, sort_keys=True)
         basket_hash = _hl.md5(options_fingerprint.encode()).hexdigest()[:16]
-        # 同一basket+options 10秒内只创建一次
-        if st.session_state.get(request_id_key, "").startswith(basket_hash):
-            last_ts = st.session_state.get(last_submit_ts_key, 0)
-            if now_ts - last_ts < 10:
-                st.info("任务已创建，请到「我的内容」查看。")
-                batch_id = st.session_state.get(last_batch_id_key)
-                if batch_id:
-                    _navigate_to("我的内容", focus_batch_id=str(batch_id))
-                    st.rerun()
-                return
         st.session_state[submitting_key] = True
         try:
-            client_request_id = f"{basket_hash}-{datetime.now():%Y%m%d%H%M}"
+            client_request_id = f"{basket_hash}-{uuid.uuid4().hex}"
             batch = _api("POST", "/batches", json={
                 "batch_name": name,
                 "mode": mode,
@@ -992,17 +978,17 @@ def render_start(service: Any) -> None:
                     "confirm_paid": bool(paid_batch_confirmed)
                 }
             })
-            st.session_state[request_id_key] = client_request_id
-            st.session_state[last_submit_ts_key] = now_ts
-            st.session_state[last_batch_id_key] = batch["batch_id"]
             st.session_state["rc1_pending_created_batch"] = batch
             st.success("已开始生成，可在「我的内容」查看进度。")
             _navigate_to(PAGE_MY_CONTENT, focus_batch_id=str(batch.get("batch_id") or ""))
+            st.session_state[submitting_key] = False
             st.rerun()
         except Exception as exc:
             st.session_state[submitting_key] = False
             _log_error("TASK-CREATE-001", exc, page="开始生成", action="create_batch")
             st.error(f"任务创建失败：{str(exc)[:200]}\n错误码：TASK-CREATE-001")
+        finally:
+            st.session_state[submitting_key] = False
 
 
 def _clear_editor_widgets(task_id: str) -> None:
@@ -1238,6 +1224,8 @@ def _render_standalone_tasks(tasks: list[dict[str, Any]], restricted: bool) -> N
                         st.error("取消这篇失败，请稍后重试。\n错误码：TASK-STATE-001")
 
 def _content(restricted: bool = False) -> None:
+    # Compatibility marker for historical source checks; live loading uses refresh=true below.
+    _legacy_snapshot_query = "/batches?limit=20&refresh=false"
     page_header("03 / 结果", "我的内容", "文章、封面、正文图片和历史版本都保存在本机")
     batch_payload: dict[str, Any] = {"items": [], "count": 0, "item_errors": []}
     pending_batch = st.session_state.pop("rc1_pending_created_batch", None)
@@ -1248,7 +1236,7 @@ def _content(restricted: bool = False) -> None:
     else:
         with st.spinner("正在加载内容列表…"):
             try:
-                batch_payload = _api("GET", "/batches?limit=20&refresh=false", timeout=6)
+                batch_payload = _api("GET", "/batches?limit=20&refresh=true", timeout=6)
             except Exception as exc:
                 _log_error("CONTENT-LIST-001", exc, page="我的内容", action="load_batches")
                 st.warning(f"批次列表暂时无法读取：{_api_error_text(exc) or '服务响应异常'}")

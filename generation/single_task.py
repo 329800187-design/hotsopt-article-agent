@@ -5,6 +5,7 @@ import hashlib
 import inspect
 import shutil
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -1054,6 +1055,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
     state = existing or _new_state(task, topic, text_profile, image_profile)
     state["max_auto_retries"] = max(0, int(settings.get("max_auto_retries", 0)))
     state["attempt"] = int(state.get("attempt") or 0) + 1
+    state["attempt_id"] = uuid.uuid4().hex[:12]
     state["retry_count"] = int(state.get("retry_count") or 0) + (1 if retry_step else 0)
     state["started_at"] = state.get("started_at") or utc_now()
     root = generation_task_dir(task["task_id"])
@@ -1079,6 +1081,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
     attempt_step = "generating_article" if run_article else "generating_cover"
     state.setdefault("attempt_history", []).append({
         "attempt": state["attempt"],
+        "attempt_id": state["attempt_id"],
         "step": attempt_step,
         "text_model": state["model_info"]["text"].get("model"),
         "model": state["model_info"]["image"].get("model") if not run_article else state["model_info"]["text"].get("model"),

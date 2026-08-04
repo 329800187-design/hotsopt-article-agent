@@ -293,7 +293,41 @@ class BatchExecutor:
                 raise ProviderError("BATCH_NOT_FOUND", "batch not found")
             if batch.get("status") in {"completed", "cancelled"}:
                 return batch
-        batch = self._ensure_shared_research(batch)
+        try:
+            batch = self._ensure_shared_research(batch)
+        except Exception as exc:
+            _logger.exception("start_batch: shared research failed batch_id=%s", batch_id)
+            # A worker-level failure must become durable item failures; otherwise
+            # the batch remains queued forever after the HTTP request has returned.
+            for item in batch.get("items", []):
+                task = item.get("task") or {}
+                task_id = str(task.get("task_id") or "")
+                if not task_id or task.get("status") in {"completed", "cancelled"}:
+                    continue
+                try:
+                    state = load_generation_task(task_id) or {
+                        "task_id": task_id,
+                        "task_name": task.get("task_name") or "",
+                        "mode": task.get("mode") or "",
+                        "selected_topics": task.get("selected_topics") or [],
+                        "generation_options": task.get("generation_options") or {},
+                    }
+                    current_version = int(state.get("state_version") or 0)
+                    state.update({
+                        "status": "failed",
+                        "stage": "batch_submit",
+                        "progress": 0,
+                        "failed_step": "batch_submit",
+                        "error_code": "BATCH_RESEARCH_FAILED",
+                        "safe_error_message": "批次准备失败，请单独重试任务。",
+                        "retryable": True,
+                        "state_version": current_version + 1,
+                    })
+                    save_generation_task(state, expected_version=current_version if current_version else None, allow_terminal_recovery=True)
+                    self.store.update_task_status(task_id, "failed")
+                except Exception:
+                    _logger.exception("start_batch: mark shared-research failure failed task_id=%s", task_id)
+            return self.store.refresh_batch(batch_id) or batch
         with self._lock:
             batch = self.store.get_batch(batch_id) or batch
             for item in batch.get("items", []):

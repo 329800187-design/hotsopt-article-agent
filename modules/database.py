@@ -418,6 +418,19 @@ class SQLiteStore:
             return "failed"
         return "partial_success"
 
+    @classmethod
+    def _batch_snapshot_counts(cls, statuses: list[str], expected_count: int) -> tuple[str, dict[str, int], int]:
+        """Derive list-facing counts from child rows, including missing children."""
+        safe_statuses = [redact_sensitive_text(str(value or "queued")) for value in statuses]
+        counts = {key: safe_statuses.count(key) for key in ("queued", "running", "completed", "failed", "cancelled", "partial_success")}
+        missing_count = max(0, int(expected_count or 0) - len(safe_statuses))
+        if missing_count:
+            counts["failed"] += missing_count
+            status = "partial_success" if safe_statuses else "failed"
+        else:
+            status = cls._summarize_batch_status(safe_statuses)
+        return status, counts, missing_count
+
     def update_batch_quality(self, batch_id: str, quality_status: str, error: str | None = None) -> None:
         safe_status = redact_sensitive_text(quality_status)
         safe_error = redact_sensitive_text(error or "")
@@ -441,19 +454,16 @@ class SQLiteStore:
 
     def refresh_batch(self, batch_id: str) -> dict[str, Any] | None:
         def write(connection: sqlite3.Connection) -> None:
+            current = connection.execute("SELECT status,started_at,completed_at,state_version,mode,quality_status,total_count FROM generation_batches WHERE batch_id=?", (batch_id,)).fetchone()
+            if not current:
+                return
             rows = connection.execute(
                 "SELECT i.batch_item_id, t.status FROM generation_batch_items i JOIN generation_tasks t ON t.task_id=i.task_id WHERE i.batch_id=? ORDER BY i.position",
                 (batch_id,),
             ).fetchall()
-            if not rows:
-                return
-            statuses = [redact_sensitive_text(str(row[1] or "queued")) for row in rows]
-            counts = {key: statuses.count(key) for key in ("queued", "running", "completed", "failed", "cancelled", "partial_success")}
+            statuses = [str(row[1] or "queued") for row in rows]
+            status, counts, missing_count = self._batch_snapshot_counts(statuses, int(current[6] or 0))
             exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
-            status = self._summarize_batch_status(statuses)
-            current = connection.execute("SELECT status,started_at,completed_at,state_version,mode,quality_status,total_count FROM generation_batches WHERE batch_id=?", (batch_id,)).fetchone()
-            if not current:
-                return
             is_multi_angle = current[4] == "single_topic_multi_angle"
             requires_quality_check = is_multi_angle and int(current[6] or 0) >= 2
             quality_status = str(current[5] or ("pending" if is_multi_angle else "not_applicable"))
@@ -498,6 +508,7 @@ class SQLiteStore:
         batch["generation_options"] = json.loads(batch.get("generation_options") or "{}")
         batch["items"] = self.list_batch_items(batch_id)
         batch["tasks"] = [item["task"] for item in batch["items"]]
+        batch["missing_count"] = max(0, int(batch.get("total_count") or 0) - len(batch["items"]))
         return batch
 
     def list_batches(self, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
@@ -557,6 +568,11 @@ class SQLiteStore:
             batch["generation_options"] = self._json_loads(batch.get("generation_options"), {})
             batch["items"] = grouped.get(str(batch["batch_id"]), [])
             batch["tasks"] = [item["task"] for item in batch["items"]]
+            statuses = [str(item["task"].get("status") or "queued") for item in batch["items"]]
+            status, counts, missing_count = self._batch_snapshot_counts(statuses, int(batch.get("total_count") or 0))
+            batch.update({"status": status, **{f"{key}_count": value for key, value in counts.items()}, "missing_count": missing_count})
+            if missing_count or status != "completed":
+                batch["final_ready"] = 0
             values.append(batch)
         return values
 

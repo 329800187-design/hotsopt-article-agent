@@ -15,6 +15,7 @@ from modules.security import sanitize_json, sanitize_sensitive_data
 from modules.task_locks import task_lock
 from providers.text_provider import ProviderError
 from generation.workflow import invalidate_after_article_change
+from generation.workflow import sync_article_images
 
 
 def _article_path(task_id: str) -> Path:
@@ -199,6 +200,9 @@ def save_article(task_id: str, changes: dict[str, Any] | None = None, store: SQL
             except (OSError, json.JSONDecodeError) as exc:
                 raise ProviderError("ARTICLE_EDIT_INVALID", "草稿无法读取") from exc
         article = _normalise_article_changes(current, sanitize_sensitive_data(changes or {}))
+        state["article"] = article
+        sync_article_images(state)
+        article = state["article"]
         candidate = Path(tempfile.mkdtemp(prefix="article-edit-", dir=root / ".attempts"))
         try:
             _write_json(candidate / "article.json", article)
@@ -207,7 +211,6 @@ def save_article(task_id: str, changes: dict[str, Any] | None = None, store: SQL
             record = commit_candidate(root, candidate, files=files, defer_finalize=True, metadata={"task_id": task_id})
         finally:
             shutil.rmtree(candidate, ignore_errors=True)
-        state["article"] = article
         invalidate_after_article_change(state)
         state["editing_article"] = article
         state["article_revision"] = int(state.get("article_revision") or 0) + 1
@@ -277,6 +280,7 @@ def restore_article_version(task_id: str, version_id: str, store: SQLiteStore | 
         if not state:
             raise ProviderError("TASK_NOT_FOUND", "task not found")
         state["article"] = sanitize_sensitive_data(json.loads((version_root / "article.json").read_text(encoding="utf-8")))
+        sync_article_images(state)
         invalidate_after_article_change(state)
         state["editing_article"] = state["article"]
         state["article_revision"] = int(state.get("article_revision") or 0) + 1
