@@ -51,7 +51,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "image_plan_mode": "none",
     "image_call_budget_per_article": 0,
     "image_call_budget_per_batch": 0,
-    "image_unit_price": None,
+    "image_unit_price": 0.10,
     "max_auto_retries": 0,
     "share_text_image_credentials": False,
     "hot_source_url": "https://api-hot.imsyy.top/toutiao",

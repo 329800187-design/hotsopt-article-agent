@@ -12,6 +12,7 @@ from generation.inline_images import (
     run_inline_images,
     set_approved_image_budget,
 )
+from generation.workflow import begin_image_generation, finish_image_generation
 from modules.generation_store import generation_task_dir, load_generation_task, save_generation_task
 from modules.models import utc_now
 from modules.security import sanitize_json
@@ -80,11 +81,19 @@ def generate_selected_images(task_id: str, image_profile: dict[str, Any], settin
             "include_cover": bool(include_cover),
             "inline_count": inline_count,
         }
+        # R2.2.18 generated articles are in article_pending_confirmation.
+        # article_draft without a confirmation marker is an older fixture/state
+        # and remains compatible with the direct worker API.
+        if str(state.get("workflow_state") or "") == "article_draft":
+            state["workflow_state"] = "article_confirmed"
+        else:
+            begin_image_generation(state)
         state.update({"status": "running", "stage": "generating_selected_images", "progress": 60, "error_code": "", "safe_error_message": ""})
         _persist(state, store)
         state = normalize_task_images_for_plan(task_id, image_mode, store=store, output_root=task_root)
         if (not include_cover or _cover_ready(state, task_root)) and _inline_ready_count(state, task_root) >= inline_count:
             state.update({"status": "completed", "stage": "completed", "progress": 100, "failed_step": None, "error_code": "", "safe_error_message": "", "retryable": False, "inline_operation": False, "completed_at": state.get("completed_at") or utc_now()})
+            finish_image_generation(state)
             return _persist(state, store)
     provider = OpenAIImageProvider(image_profile, network_settings=settings.get("network"))
     try:
@@ -132,6 +141,7 @@ def generate_selected_images(task_id: str, image_profile: dict[str, Any], settin
             with task_lock(task_id):
                 state = load_generation_task(task_id) or state
                 state.update({"status": "completed", "stage": "completed", "progress": 100, "completed_at": utc_now(), "inline_operation": False})
+                finish_image_generation(state)
                 _persist(state, store)
         return state
     except Exception as exc:

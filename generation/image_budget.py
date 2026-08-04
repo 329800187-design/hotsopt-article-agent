@@ -7,6 +7,7 @@ from typing import Any
 IMAGE_PLANS: dict[str, dict[str, Any]] = {
     "none": {"label": "纯文字", "cover": 0, "inline_min": 0, "inline_max": 0, "retry_limit": 0},
     "economy": {"label": "经济型", "cover": 1, "inline_min": 0, "inline_max": 0, "retry_limit": 0},
+    "low": {"label": "低成本型", "cover": 1, "inline_min": 1, "inline_max": 1, "retry_limit": 0},
     "standard": {"label": "标准型", "cover": 1, "inline_min": 1, "inline_max": 1, "retry_limit": 0},
     "three": {"label": "3张图", "cover": 1, "inline_min": 2, "inline_max": 2, "retry_limit": 0},
     "four": {"label": "4张图", "cover": 1, "inline_min": 3, "inline_max": 3, "retry_limit": 0},
@@ -25,6 +26,7 @@ def normalize_image_plan(value: str | None) -> str:
         "none": "none",
         "economy": "economy",
         "economic": "economy",
+        "low": "low",
         "standard": "standard",
         "rich": "standard",
         "three": "three",
@@ -49,7 +51,7 @@ def image_plan_for(word_count: int, mode: str = "standard") -> dict[str, Any]:
 def calculate_image_budget(article_count: int, image_mode: str) -> int:
     count = max(0, int(article_count or 0))
     mode = normalize_image_plan(image_mode)
-    per_article = {"none": 0, "economy": 1, "standard": 2, "three": 3, "four": 4, "five": 5}[mode]
+    per_article = {"none": 0, "economy": 1, "low": 2, "standard": 2, "three": 3, "four": 4, "five": 5}[mode]
     return count * per_article
 
 

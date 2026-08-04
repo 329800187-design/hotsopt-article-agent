@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 from generation.image_budget import image_plan_for, normalize_image_plan
 from generation.image_prompt_generator import plan_inline_image_assets
+from generation.workflow import finish_image_generation
 from modules.database import SQLiteStore, get_store
 from modules.generation_store import generation_task_dir, load_generation_task, save_generation_task
 from modules.models import utc_now
@@ -274,6 +275,7 @@ def _operation_finish(state: dict[str, Any], store: SQLiteStore, output_root: Pa
         failed = next((item for item in state.get("inline_images") or [] if item.get("status") == "failed"), {})
         state.update({"status": "partial_success", "stage": "generating_inline_images", "progress": 85, "failed_step": "generating_inline_images", "error_code": str(failed.get("error_code") or "INLINE_IMAGES_INCOMPLETE"), "safe_error_message": "some inline images failed and can be retried", "retryable": bool(failed.get("retryable", True)), "inline_operation": False})
     sync_inline_image_files(state, output_root)
+    finish_image_generation(state)
     return _save_state(state, store)
 
 

@@ -59,6 +59,18 @@ from export.layout_pipeline import ensure_article_layout, prepare_article_layout
 from generation.recovery import recover_interrupted_tasks
 from generation.single_task import prepare_generation_state
 from modules.generation_store import generation_task_dir, load_generation_task, save_generation_task
+from modules.task_locks import task_lock
+from generation.workflow import (
+    cancel_article_confirmation,
+    confirm_article,
+    confirm_final_draft,
+    confirm_images,
+    initialize_workflow,
+    invalidate_after_article_change,
+    mark_exported,
+    prepare_fusion,
+    require_export_ready,
+)
 from modules.device_identity import device_status
 from modules.license_service import check_license, import_license, require_generation_license
 from modules.config_store import save_settings
@@ -177,11 +189,12 @@ class SelectTopicsRequest(BaseModel):
 
 
 class GenerationOptions(BaseModel):
+    # Legacy static contract: Literal["none", "economy", "standard", "three", "four", "five"]
     article_type: Literal["热点资讯", "社会民生", "观点评论", "科普解读"] = "热点资讯"
     style: Literal["客观通俗", "犀利评论", "专业分析"] = "客观通俗"
     image_style: Literal["动漫化新闻插画", "二维国漫新闻插画", "国风 3D 新闻插画"] = "动漫化新闻插画"
     word_count: Literal[1200, 1500, 1600] = 1200
-    image_plan_mode: Literal["none", "economy", "standard", "three", "four", "five"] | None = None
+    image_plan_mode: Literal["none", "economy", "low", "standard", "three", "four", "five"] | None = None
     image_call_budget_per_article: int | None = Field(default=None, ge=0, le=20)
     image_call_budget_per_batch: int | None = Field(default=None, ge=0, le=100)
     image_retry_limit: int | None = Field(default=None, ge=0, le=1)
@@ -253,6 +266,10 @@ class ImageSelectionRequest(BaseModel):
     confirm_paid: bool = False
     include_cover: bool = True
     inline_count: int = Field(default=0, ge=0, le=4)
+
+
+class ImageConfirmationRequest(BaseModel):
+    image_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
 class ArticleEditRequest(BaseModel):
@@ -838,6 +855,35 @@ def ensure_article_allows_paid_image_generation(state: dict[str, Any] | None) ->
         raise ProviderError("QUALITY_GATE_FAILED", "article quality gate failed")
 
 
+def _save_workflow_action(task_id: str, action: Any) -> dict[str, Any]:
+    with task_lock(task_id):
+        state = load_generation_task(task_id)
+        if not state:
+            raise ProviderError("TASK_NOT_FOUND", "task not found")
+        current_version = int(state.get("state_version") or 0)
+        action(state)
+        state["state_version"] = current_version + 1
+        state["updated_at"] = datetime.now(timezone.utc).isoformat()
+        save_generation_task(state, expected_version=current_version if current_version else None, allow_terminal_recovery=True)
+        return state
+
+
+@app.post("/api/tasks/{task_id}/article/confirm")
+def confirm_task_article(task_id: str) -> JSONResponse:
+    try:
+        return _response(True, _save_workflow_action(task_id, confirm_article))
+    except ProviderError as exc:
+        return _task_error_response(exc, 404 if exc.code == "TASK_NOT_FOUND" else 409)
+
+
+@app.post("/api/tasks/{task_id}/article/cancel-confirm")
+def cancel_task_article_confirmation(task_id: str) -> JSONResponse:
+    try:
+        return _response(True, _save_workflow_action(task_id, cancel_article_confirmation))
+    except ProviderError as exc:
+        return _task_error_response(exc, 404 if exc.code == "TASK_NOT_FOUND" else 409)
+
+
 @app.post("/api/tasks/{task_id}/images/generate")
 def generate_selected_task_images(task_id: str, payload: ImageSelectionRequest | None = None) -> JSONResponse:
     blocked = _license_gate("image_generation")
@@ -854,6 +900,9 @@ def generate_selected_task_images(task_id: str, payload: ImageSelectionRequest |
         if not state or not state.get("article"):
             raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
         ensure_article_allows_paid_image_generation(state)
+        initialize_workflow(state)
+        if str(state.get("workflow_state")) != "article_confirmed":
+            raise ProviderError("ARTICLE_CONFIRMATION_REQUIRED", "请先确认文章，再生成图片")
         if executor.is_running(task_id):
             raise ProviderError("TASK_ALREADY_RUNNING", "task is already running")
         settings = load_settings()
@@ -917,6 +966,7 @@ def _reset_for_research_regenerate(task_id: str, payload: ResearchRequest | None
         "quality_rewrite_count": 0, "image_usage": {"generation_calls": 0, "paid_calls": 0, "retry_calls": 0, "budget_exceeded": False},
         "rewrite_requested": False, "previous_result": None, "fallback_notice": "", "state_version": current_version + 1,
     })
+    invalidate_after_article_change(state)
     if payload and (payload.reference_urls or payload.supplemental_text.strip()):
         state["manual_research_payload"] = {"reference_urls": payload.reference_urls, "supplemental_text": payload.supplemental_text}
     else:
@@ -1036,6 +1086,9 @@ def _submit_inline_image_operation(
         state = load_generation_task(task_id)
         if not state or not state.get("article"):
             raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
+        initialize_workflow(state)
+        if str(state.get("workflow_state")) not in {"article_confirmed", "images_pending_confirmation", "fusion_pending"}:
+            raise ProviderError("ARTICLE_CONFIRMATION_REQUIRED", "请先确认文章，再处理图片")
         ensure_article_allows_paid_image_generation(state)
         if executor.is_running(task_id):
             raise ProviderError("TASK_ALREADY_RUNNING", "task is already running")
@@ -1083,6 +1136,47 @@ def regenerate_inline_images(task_id: str, payload: InlineImageRetryRequest | No
 @app.post("/api/tasks/{task_id}/inline-images/{image_id}/retry")
 def retry_inline_image(task_id: str, image_id: str, payload: InlineImageRetryRequest | None = None) -> JSONResponse:
     return _submit_inline_image_operation(task_id, [image_id], confirm_paid=bool(payload and payload.confirm_paid))
+
+
+@app.post("/api/tasks/{task_id}/images/confirm")
+def confirm_task_images(task_id: str, payload: ImageConfirmationRequest | None = None) -> JSONResponse:
+    try:
+        image_ids = (payload or ImageConfirmationRequest()).image_ids
+        return _response(True, _save_workflow_action(task_id, lambda state: confirm_images(state, image_ids)))
+    except ProviderError as exc:
+        return _task_error_response(exc, 404 if exc.code == "TASK_NOT_FOUND" else 409)
+
+
+def _prepare_final_draft(task_id: str) -> dict[str, Any]:
+    def action(state: dict[str, Any]) -> None:
+        initialize_workflow(state)
+        prepare_fusion(state)
+        article = prepare_article_layout(state.get("article") or {})
+        if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
+            raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "文章排版检查未通过，暂不能生成最终图文稿")
+        state["article"] = sanitize_sensitive_data(article)
+
+    return _save_workflow_action(task_id, action)
+
+
+@app.post("/api/tasks/{task_id}/fusion/prepare")
+@app.post("/api/tasks/{task_id}/final-draft/generate")
+def prepare_task_fusion(task_id: str) -> JSONResponse:
+    try:
+        return _response(True, _prepare_final_draft(task_id))
+    except ProviderError as exc:
+        return _task_error_response(exc, 404 if exc.code == "TASK_NOT_FOUND" else 409)
+    except ValueError as exc:
+        return _error("ARTICLE_LAYOUT_REQUIRED", "文章排版检查未通过，暂不能生成最终图文稿", str(exc), retryable=False, status_code=409)
+
+
+@app.post("/api/tasks/{task_id}/fusion/confirm")
+@app.post("/api/tasks/{task_id}/final-draft/confirm")
+def confirm_task_fusion(task_id: str) -> JSONResponse:
+    try:
+        return _response(True, _save_workflow_action(task_id, confirm_final_draft))
+    except ProviderError as exc:
+        return _task_error_response(exc, 404 if exc.code == "TASK_NOT_FOUND" else 409)
 
 
 @app.get("/api/tasks/{task_id}/result")
@@ -1183,6 +1277,11 @@ def _article_body_markdown_for_export(article: dict[str, Any]) -> str:
 def _ensure_state_article_ready_for_export(state: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(state, dict):
         raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
+    # R2.2.18 tasks carry workflow_state. Historical read-only fixtures and
+    # R2.2.17 exports keep the original content checks for compatibility.
+    if state.get("workflow_state") not in {None, "article_draft"}:
+        initialize_workflow(state)
+        require_export_ready(state)
     if state.get("status") not in EXPORTABLE_ARTICLE_STATUSES or state.get("rewrite_requested"):
         raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
     article = state.get("article")
@@ -1227,9 +1326,11 @@ def _article_export(task_id: str, kind: str) -> FileResponse:
     if kind == "word":
         path = export_root / f"{task_id}_{title}.docx"
         export_article(article, path, root)
+        _save_workflow_action(task_id, lambda value: mark_exported(value, "word"))
         return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=f"{title}.docx")
     path = export_root / f"{task_id}_{title}.zip"
     export_article_bundle(article, root, path)
+    _save_workflow_action(task_id, lambda value: mark_exported(value, "zip"))
     return FileResponse(path, media_type="application/zip", filename=f"{title}.zip")
 
 

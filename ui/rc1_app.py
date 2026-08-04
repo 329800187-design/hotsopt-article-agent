@@ -25,6 +25,7 @@ from modules.device_identity import device_status
 from modules.license_schema import LicenseValidationError
 from modules.license_service import check_license, check_system_time, clock_status, import_license, import_license_text, license_error_message, recover_clock_rollback
 from generation.image_budget import calculate_image_budget, image_cost_preview, normalize_image_plan, recommended_word_count
+from generation.workflow import WORKFLOW_STATES
 from modules.app_version import APP_SHORT_NAME, APP_VERSION, BUILD_COMMIT, BUILD_TIME_UTC, PRODUCT_NAME, diagnostic_info
 from providers.errors import user_facing_error_message
 from providers.registry import ui_presets
@@ -380,7 +381,7 @@ def _mount_autosave(task_id: str) -> None:
     if fragment is None:
         st.caption("编辑后可点击“保存草稿”")
         return
-    fragment(run_every="1s")(_autosave_body)(task_id)
+    fragment(run_every="5s")(_autosave_body)(task_id)
 
 
 def render_choose_topic(service: Any, categories: list[str]) -> None:
@@ -846,6 +847,10 @@ def render_start(service: Any) -> None:
         "🟣 5张图（1封面+4正文图）": "five",
     }
     image_mode = cost_mode_map[cost_mode_label]
+    # Preserve old widget state while changing the first option to the R2.2.18 low-cost plan.
+    if cost_mode_label == next(iter(cost_mode_map)):
+        image_mode = "low"
+    st.caption("低成本模式默认生成 2 张图（封面 + 1 张正文图），实际费用按模型设置中的单图估算价计算。")
 
     # === Article Config ===
     mode_label = st.radio("创作模式", ["单热点生成多篇", "多热点各生成1篇"], horizontal=True)
@@ -887,9 +892,15 @@ def render_start(service: Any) -> None:
 
     # === Budget Preview ===
     with col3:
-        preview = image_cost_preview(total_articles, word_count, image_mode)
+        pricing_settings = load_settings()
+        configured_unit_price = pricing_settings.get("image_unit_price")
+        if configured_unit_price is None:
+            configured_unit_price = pricing_settings.get("image_estimated_cost_per_call")
+        unit_price = float(configured_unit_price) if configured_unit_price is not None else 0.10
+        preview = image_cost_preview(total_articles, word_count, image_mode, unit_price=unit_price)
         text_calls = total_articles
         image_calls = calculate_image_budget(total_articles, image_mode)
+        st.caption(f"estimated image cost: {preview.get('estimated_cost', 0):.2f} yuan at {unit_price:.2f} yuan/image")
         image_retry = 0
         text_rewrite = 0
         
@@ -1413,16 +1424,22 @@ def _content(restricted: bool = False) -> None:
                             body_markdown = "\n\n".join(body_parts).strip()
                         with st.expander("查看全文"):
                             st.markdown(body_markdown or "")
+                        workflow_state = str(state.get("workflow_state") or "article_pending_confirmation")
+                        st.caption(f"交付流程：{workflow_state}")
+                        if workflow_state == "article_pending_confirmation" and not restricted:
+                            if st.button("确认文章", type="primary", key=f"rc1_confirm_article_{task_id}"):
+                                _api("POST", f"/tasks/{task_id}/article/confirm")
+                                st.rerun()
                         exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
                         layout_ok = (article.get("layout_check") or {}).get("passed", bool(body_markdown))
-                        if state.get("status") in exportable_statuses and gate.get("status") != "failed" and layout_ok:
+                        if workflow_state in {"final_draft_confirmed", "export_ready", "exported"} and state.get("status") in exportable_statuses and gate.get("status") != "failed" and layout_ok:
                             _download(f"/tasks/{task_id}/export/word", f"{article.get('title') or '文章'}.docx", "导出 Word", f"rc1_word_{task_id}")
                             _download(f"/tasks/{task_id}/export/zip", f"{article.get('title') or '文章'}.zip", "导出单篇 ZIP", f"rc1_zip_{task_id}")
                             if st.button("打开保存位置", key=f"rc1_open_export_item_{task_id}"):
                                 _open_export_location()
                         else:
                             st.info("文章尚未通过质量门禁，暂不能作为正式成品导出。")
-                        if state.get("status") == "completed" and gate.get("status") in {"passed", "warning"}:
+                        if state.get("status") == "completed" and gate.get("status") in {"passed", "warning"} and workflow_state == "article_confirmed":
                             st.markdown("#### 文章确认后再生成图片")
                             requested_mode = normalize_image_plan((state.get("generation_options") or {}).get("image_plan_mode"))
                             if requested_mode == "economy":
@@ -1454,7 +1471,9 @@ def _content(restricted: bool = False) -> None:
                         render_editor(task_id, state)
                     cover = generation_task_dir(task_id) / "images" / "cover.png"
                     if cover.is_file() and (state.get("cover") or {}).get("status") == "completed":
-                        st.image(str(cover), caption="封面")
+                        show_cover_key = f"rc1_show_cover_{task_id}"
+                        if st.checkbox("查看封面", key=show_cover_key):
+                            st.image(str(cover), caption="封面", width=720)
                     show_progress(state)
                     if st.session_state.pop(f"rc1_stuck_cancel_request_{task_id}", False):
                         try:
@@ -1494,7 +1513,10 @@ def _content(restricted: bool = False) -> None:
                                 image_path = generation_task_dir(task_id) / str(image.get("path") or image.get("file_path") or "")
                                 if image.get("status") == "completed" and image_path.is_file():
                                     large_key = f"rc1_inline_large_{task_id}_{image.get('image_id')}"
-                                    st.image(str(image_path), caption=str(image.get("section_title") or image.get("paragraph_ref") or "正文图片"), use_container_width=bool(st.session_state.get(large_key)))
+                                    if st.session_state.get(large_key):
+                                        st.image(str(image_path), caption=str(image.get("section_title") or image.get("paragraph_ref") or "正文图片"), width=720)
+                                    else:
+                                        st.caption(f"已生成：{image.get('section_title') or image.get('paragraph_ref') or '正文图片'}")
                                     if st.button("查看大图", key=f"rc1_inline_view_{task_id}_{image.get('image_id')}"):
                                         st.session_state[large_key] = True
                                         st.rerun()
@@ -1533,6 +1555,20 @@ def _content(restricted: bool = False) -> None:
                                 if st.button("使用补充资料重新生成", type="primary", key=f"rc1_submit_reference_{task_id}"):
                                     _api("POST", f"/batches/{batch['batch_id']}/items/{task_id}/research-regenerate", json={"reference_urls": [line.strip() for line in reference_urls.splitlines() if line.strip()], "supplemental_text": supplemental_text})
                                     st.rerun()
+                    workflow_state = str(state.get("workflow_state") or "article_pending_confirmation")
+                    if article and workflow_state == "images_pending_confirmation" and not restricted:
+                        if st.button("确认所选图片", type="primary", key=f"rc1_confirm_images_{task_id}"):
+                            _api("POST", f"/tasks/{task_id}/images/confirm", json={"image_ids": []})
+                            st.rerun()
+                    if article and workflow_state == "fusion_pending" and not restricted:
+                        if st.button("生成最终图文稿", type="primary", key=f"rc1_prepare_fusion_{task_id}"):
+                            _api("POST", f"/tasks/{task_id}/fusion/prepare")
+                            st.rerun()
+                    if article and workflow_state == "final_draft_pending_preview" and not restricted:
+                        st.info("最终图文稿预览已生成，请确认后导出")
+                        if st.button("确认最终图文稿", type="primary", key=f"rc1_confirm_fusion_{task_id}"):
+                            _api("POST", f"/tasks/{task_id}/fusion/confirm")
+                            st.rerun()
                         regen_col, rewrite_col, delete_col = st.columns(3)
                         if regen_col.button("重新搜索资料并生成", key=f"rc1_research_regen_item_{task_id}"):
                             _api("POST", f"/batches/{batch['batch_id']}/items/{task_id}/research-regenerate")

@@ -14,6 +14,7 @@ from modules.models import utc_now
 from modules.security import sanitize_json, sanitize_sensitive_data
 from modules.task_locks import task_lock
 from providers.text_provider import ProviderError
+from generation.workflow import invalidate_after_article_change
 
 
 def _article_path(task_id: str) -> Path:
@@ -207,6 +208,7 @@ def save_article(task_id: str, changes: dict[str, Any] | None = None, store: SQL
         finally:
             shutil.rmtree(candidate, ignore_errors=True)
         state["article"] = article
+        invalidate_after_article_change(state)
         state["editing_article"] = article
         state["article_revision"] = int(state.get("article_revision") or 0) + 1
         state["article_edit_status"] = "saved"
@@ -275,6 +277,7 @@ def restore_article_version(task_id: str, version_id: str, store: SQLiteStore | 
         if not state:
             raise ProviderError("TASK_NOT_FOUND", "task not found")
         state["article"] = sanitize_sensitive_data(json.loads((version_root / "article.json").read_text(encoding="utf-8")))
+        invalidate_after_article_change(state)
         state["editing_article"] = state["article"]
         state["article_revision"] = int(state.get("article_revision") or 0) + 1
         state["article_edit_status"] = "restored"

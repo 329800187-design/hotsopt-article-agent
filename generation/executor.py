@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import threading
 import time
+import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from generation.single_task import cancel_single_task, is_cancel_requested, run_single_task
-from modules.database import SQLiteStore
+from modules.database import SQLiteStore, get_store
 from modules.generation_store import load_generation_task, save_generation_task
 from modules.models import utc_now
 from modules.task_locks import get_task_lock
 from providers.errors import is_retryable_error
+
+
+_logger = logging.getLogger(__name__)
 
 
 class GenerationExecutor:
@@ -79,9 +83,41 @@ class GenerationExecutor:
         return function()
 
     def _forget(self, task_id: str, future: Future) -> None:
+        if future.cancelled():
+            _logger.info("background task cancelled task_id=%s", task_id)
+        else:
+            exception = future.exception()
+            if exception is not None:
+                _logger.exception("background task crashed task_id=%s", task_id, exc_info=(type(exception), exception, exception.__traceback__))
+                self._mark_unhandled_failure(task_id, exception)
         with self._registry_lock:
             if self._futures.get(task_id) is future:
                 self._futures.pop(task_id, None)
+
+    def _mark_unhandled_failure(self, task_id: str, exception: BaseException) -> None:
+        """Make a worker exception visible instead of leaving the task running forever."""
+        state = load_generation_task(task_id)
+        if not state or state.get("status") not in {"queued", "running"}:
+            return
+        current_version = int(state.get("state_version") or 0)
+        state.update({
+            "status": "failed",
+            "stage": "failed",
+            "progress": 100,
+            "failed_step": str(state.get("stage") or "background_task"),
+            "error_code": "BACKGROUND_TASK_CRASH",
+            "safe_error_message": "后台任务异常结束，请查看错误详情后重试",
+            "error_details": {"type": type(exception).__name__},
+            "retryable": True,
+            "finished_at": utc_now(),
+            "state_version": current_version + 1,
+            "updated_at": utc_now(),
+        })
+        try:
+            save_generation_task(state, expected_version=current_version)
+            get_store().update_task_status(task_id, "failed")
+        except Exception:
+            _logger.exception("could not persist background crash task_id=%s", task_id)
 
     def cancel(self, task_id: str, store: SQLiteStore) -> dict[str, Any]:
         with self.task_lock(task_id):

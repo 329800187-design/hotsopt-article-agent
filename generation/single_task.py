@@ -171,6 +171,8 @@ def _new_state(task: dict[str, Any], topic: HotTopic, text_profile: dict[str, An
         "quality_evidence": {"article_sha_before": None, "article_sha_after": None, "prompt_sha_before": None, "prompt_sha_after": None, "cover_prompt_sha": None},
         "similarity_evidence": None,
         "inline_images": [], "inline_image_summary": {"total": 0, "completed": 0, "failed": 0, "pending": 0, "status": "pending"}, "inline_operation": False,
+        "workflow_state": "article_draft", "article_confirmation": {"status": "pending"}, "image_confirmation": {"status": "pending"},
+        "fusion_status": {"status": "not_started"}, "final_draft_status": {"status": "not_started"}, "export_status": {"status": "not_ready"},
         "research_bundle": None, "quality_gate": {"status": "not_checked", "metrics": {}, "reasons": []}, "quality_rewrite_count": 0,
         "text_generation_calls": 0, "text_generation_limit": 3, "text_generation_second_call_reason": "", "text_generation_call_reasons": [],
         "image_plan": {}, "image_usage": {"generation_calls": 0, "paid_calls": 0, "retry_calls": 0, "budget_exceeded": False},
@@ -1484,7 +1486,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
                 return _failure(state, store, "layout_check", ProviderError("ARTICLE_LAYOUT_CHECK_FAILED", str(layout_error)), "failed")
             state["article"] = sanitize_json(article)
             state["layout_check"] = sanitize_json(article.get("layout_check") or {})
-            state.update({"article": sanitize_json(article), "cover": None, "inline_images": [], "inline_image_summary": {"total": 0, "completed": 0, "failed": 0, "pending": 0, "status": "completed"}, "stage": "completed", "progress": 100, "status": "completed", "completed_at": utc_now(), "failed_step": None, "error_code": "", "safe_error_message": "", "quality_gate": state.get("quality_gate") or {"status": "passed"}})
+            state.update({"article": sanitize_json(article), "cover": None, "inline_images": [], "inline_image_summary": {"total": 0, "completed": 0, "failed": 0, "pending": 0, "status": "completed"}, "stage": "completed", "progress": 100, "status": "completed", "completed_at": utc_now(), "failed_step": None, "error_code": "", "safe_error_message": "", "quality_gate": state.get("quality_gate") or {"status": "passed"}, "workflow_state": "article_pending_confirmation"})
             _write_json(root / "article.json", article)
             _write_text(root / "article.md", str(article.get("content_markdown") or ""))
             return _persist(state, store)
@@ -1621,7 +1623,7 @@ def run_single_task(task: dict[str, Any], text_profile: dict[str, Any], image_pr
         state["quality_evidence"]["prompt_sha_after"] = _file_sha(article_prompt_path)
         state["quality_evidence"]["cover_prompt_sha"] = _file_sha(cover_prompt_path)
         state["attempt_history"][-1].update({"article_sha_after": state["quality_evidence"]["article_sha_after"], "prompt_sha_after": state["quality_evidence"]["prompt_sha_after"], "cover_prompt_sha": state["quality_evidence"]["cover_prompt_sha"]})
-        state.update({"status": "completed", "stage": "completed", "progress": 100, "completed_at": utc_now(), "failed_step": None, "error_code": "", "safe_error_message": "", "rewrite_requested": False, "previous_result": None})
+        state.update({"status": "completed", "stage": "completed", "progress": 100, "completed_at": utc_now(), "failed_step": None, "error_code": "", "safe_error_message": "", "rewrite_requested": False, "previous_result": None, "workflow_state": "images_pending_confirmation" if state.get("cover") or state.get("inline_images") else "article_pending_confirmation"})
         state["attempt_history"][-1]["status"] = "completed"
         return _persist(state, store)
     except VersionCommitError as exc:
