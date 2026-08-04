@@ -1277,8 +1277,8 @@ def _article_body_markdown_for_export(article: dict[str, Any]) -> str:
 def _ensure_state_article_ready_for_export(state: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(state, dict):
         raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
-    # R2.2.18 tasks carry workflow_state. Historical read-only fixtures and
-    # R2.2.17 exports keep the original content checks for compatibility.
+    # Current workflow tasks carry workflow_state. Historical read-only
+    # fixtures keep the original content checks for compatibility.
     if state.get("workflow_state") not in {None, "article_draft"}:
         initialize_workflow(state)
         require_export_ready(state)
