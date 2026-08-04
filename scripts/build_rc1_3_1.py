@@ -80,6 +80,16 @@ def make_windows_package(source_zip: Path, launcher: Path, output: Path) -> Path
         entries = {name: archive.read(name) for name in archive.namelist()}
     entries.pop("Hotspot Article Agent.exe", None)
     entries[APP_EXE] = launcher.read_bytes()
+    # The .NET apphost is framework-dependent. Keep its generated launcher
+    # sidecars beside the copied executable or the installed EXE exits before
+    # the Python desktop host can start.
+    for sidecar in launcher.parent.iterdir():
+        if not sidecar.is_file() or sidecar.suffix.lower() not in {".dll", ".json"}:
+            continue
+        if "setup" in sidecar.stem.lower():
+            continue
+        if sidecar.name.endswith((".deps.json", ".runtimeconfig.json")) or sidecar.suffix.lower() == ".dll":
+            entries[sidecar.name] = sidecar.read_bytes()
     webview2_bootstrapper = ROOT / "packaging" / "assets" / "MicrosoftEdgeWebView2Setup.exe"
     if not webview2_bootstrapper.is_file() or webview2_bootstrapper.read_bytes()[:2] != b"MZ":
         raise RuntimeError("缺少官方 WebView2 Evergreen Bootstrapper: packaging/assets/MicrosoftEdgeWebView2Setup.exe")

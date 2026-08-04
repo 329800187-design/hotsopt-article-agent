@@ -551,6 +551,8 @@ def main() -> int:
     )
 
     native_dir = ROOT / "build" / "native-r228-p1"
+    if native_dir.exists():
+        shutil.rmtree(native_dir)
     launcher, _setup_stub = base.build_native(native_dir)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
