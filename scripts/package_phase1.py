@@ -23,7 +23,7 @@ SENSITIVE_PATTERNS = {
     "proxy_credentials": re.compile(r"https?://[^/\s:@]+:[^/\s@]+@", re.I),
 }
 TEST_FIXTURE_MARKER = re.compile(r"def\s+test_|pytest|test_fixture|example\.invalid|\b(:SECRET|TOKEN|COOKIE|PWD|TOP_SECRET|EMBEDDED_SECRET)\b|fake[-_ ]image", re.I)
-RUNTIME_PARTS = {".venv", "__pycache__", ".pytest_cache", ".pytest-tmp", ".tmp", "logs", "outputs", "data", "build"}
+RUNTIME_PARTS = {".venv", "__pycache__", ".pytest_cache", ".pytest-tmp", ".tmp", "logs", "outputs", "data", "build", "obj", "bin"}
 SAFE_RUNTIME_TOKEN_ASSIGNMENTS = (
     re.compile(
         r"""^\s*token\s*=\s*os\.environ\.get\(\s*["']HOTSPOT_LOCAL_API_TOKEN["']\s*,\s*["']{2}\s*\)\s*$"""
