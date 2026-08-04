@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from modules.app_metadata import APP_VERSION, DATA_DIR_NAME, LICENSE_ADMIN_EXE_N
 RELEASE = APP_VERSION
 STATUS = f"{APP_VERSION} Issue #1 自动化修复完成，等待 Windows 真实设备身份与许可证闭环复测。"
 PRODUCT = f"\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0_{RELEASE}"
+OUTPUT_DIR = Path(os.environ.get("R218_OUTPUT_DIR", str(ROOT))).resolve()
 APP_NAME = PRODUCT_NAME
 APP_EXE = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0.exe"
 INSTALL_DIR_NAME = "\u70ed\u70b9\u56fe\u6587\u6279\u91cf\u751f\u4ea7\u5de5\u4f5c\u53f0"
@@ -37,6 +39,21 @@ base.APP_EXE = APP_EXE
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def require_dotnet_sdk() -> str:
+    try:
+        version = subprocess.check_output(
+            ["dotnet", "--version"], cwd=ROOT, text=True, stderr=subprocess.STDOUT
+        ).strip()
+        installed = subprocess.check_output(
+            ["dotnet", "--list-sdks"], cwd=ROOT, text=True, stderr=subprocess.STDOUT
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError("DOTNET_8_SDK_REQUIRED") from exc
+    if not version.startswith("8.") or not any(line.strip().startswith("8.") for line in installed.splitlines()):
+        raise RuntimeError(f"DOTNET_8_SDK_REQUIRED: version={version!r}")
+    return version
 
 
 def read_json(path: Path) -> dict:
@@ -480,34 +497,20 @@ def build_license_admin_package(output: Path) -> Path:
     return output
 
 
-def write_sha256s(paths: list[Path]) -> Path:
+def write_sha256s(paths: list[Path], output: Path) -> Path:
     lines = []
     for path in paths:
         if path.is_file():
             lines.append(f"{sha256(path)}  {path.name}")
-    output = ROOT / "SHA256SUMS"
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return output
 
 def make_evidence_package(output: Path) -> Path:
-    prior_candidates = sorted(
-        ROOT.glob("RC1.3.3-Lite-*_鐪熷疄鐑偣璇佹嵁鍖zip"),
-        key=lambda item: item.stat().st_mtime,
-        reverse=True,
-    )
-    prior = prior_candidates[0] if prior_candidates else ROOT / "__missing_previous_evidence__.zip"
     payload = {
         "release": RELEASE,
-        "status": "reused_previous_real_hotspot_evidence",
-        "note": "\u672c\u8bc1\u636e\u5305\u6cbf\u7528\u4e0a\u4e00\u8f6e\u771f\u5b9e\u70ed\u70b9\u8bc1\u636e\uff0c\u672c\u8f6e\u4ec5\u8865\u5145 HF4.1 \u6700\u7ec8\u6784\u5efa\u4e0e\u4ea4\u4ed8\u6838\u9a8c\u4fe1\u606f\u3002",
+        "status": "build_only_evidence",
+        "note": "\u672c\u5305\u53ea\u8bb0\u5f55\u672c\u8f6e\u6784\u5efa\u4e0e\u5b89\u88c5\u70df\u6d4b\uff0c\u4e0d\u5305\u542b\u5386\u53f2\u771f\u5b9e\u70ed\u70b9\u5185\u5bb9\u3002",
     }
-    if prior.is_file():
-        with zipfile.ZipFile(prior) as archive:
-            names = [name for name in archive.namelist() if name.endswith(".json")]
-            if names:
-                payload = json.loads(archive.read(names[0]).decode("utf-8-sig"))
-                payload["release"] = RELEASE
-                payload["hf4_1_note"] = "\u672c\u8bc1\u636e\u5305\u6cbf\u7528\u4e0a\u4e00\u8f6e\u771f\u5b9e\u70ed\u70b9\u8bc1\u636e\uff0c\u672c\u8f6e\u4ec5\u8865\u5145 HF4.1 \u6700\u7ec8\u6784\u5efa\u4e0e\u4ea4\u4ed8\u6838\u9a8c\u4fe1\u606f\u3002"
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         archive.writestr(f"{RELEASE}_鐪熷疄鐑偣璇佹嵁.json", json.dumps(payload, ensure_ascii=False, indent=2))
     return output
@@ -518,29 +521,49 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     configure_clean_runtime_environment()
+    dotnet_sdk_version = require_dotnet_sdk()
     try:
         build_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     except (OSError, subprocess.SubprocessError):
         build_commit = os.environ.get("GITHUB_SHA", "unknown")
     build_time = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    build_branch = subprocess.check_output(
+        ["git", "branch", "--show-current"], cwd=ROOT, text=True
+    ).strip()
+    build_architecture = "x64" if platform.machine().lower() in {"amd64", "x86_64"} else platform.machine()
     (ROOT / "modules" / "build_metadata.json").write_text(
-        json.dumps({"app_version": APP_VERSION, "build_commit": build_commit, "build_time_utc": build_time}, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            {
+                "app_version": APP_VERSION,
+                "build_commit": build_commit,
+                "build_branch": build_branch,
+                "build_time": build_time,
+                "build_time_utc": build_time,
+                "dotnet_sdk_version": dotnet_sdk_version,
+                "build_architecture": build_architecture,
+                "build_mode": "release",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
 
     native_dir = ROOT / "build" / "native-r228-p1"
     launcher, _setup_stub = base.build_native(native_dir)
 
-    source_zip = ROOT / f"{PRODUCT}_Source.zip"
-    source_manifest = ROOT / "HF4.1-R1.2_source_manifest.json"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    source_zip = OUTPUT_DIR / f"{PRODUCT}_Source.zip"
+    source_manifest = OUTPUT_DIR / f"{PRODUCT}_source_manifest.json"
     package_phase1.OUTPUT = source_zip
     package_phase1.MANIFEST = source_manifest
     package_phase1.main()
 
-    windows_zip = ROOT / f"{PRODUCT}_Windows运行包.zip"
+    windows_zip = OUTPUT_DIR / f"{PRODUCT}_Windows运行包.zip"
     base.make_windows_package(source_zip, launcher, windows_zip)
 
-    setup = ROOT / f"{PRODUCT}_Setup.exe"
+    setup = OUTPUT_DIR / f"{PRODUCT}_Setup.exe"
     build_inno_setup(windows_zip, setup)
 
     install_check = run_inno_install_uninstall_check(setup)
@@ -554,10 +577,18 @@ def main() -> int:
     if not all(bool(install_check.get(key)) for key in required_install_checks):
         raise RuntimeError("INNO_INSTALL_UNINSTALL_CHECK_FAILED\n" + json.dumps(install_check, ensure_ascii=False, indent=2))
 
-    customer_zip = customer_package(setup, ROOT / f"{PRODUCT}_客户交付包.zip")
-    evidence_zip = make_evidence_package(ROOT / f"{RELEASE}_真实热点证据包.zip")
-    gui_evidence = ROOT / f"{RELEASE}_用户主流程GUI证据包.zip"
-    test_record = read_json(ROOT / "build" / f"{RELEASE}_test_record.json")
+    customer_zip = customer_package(setup, OUTPUT_DIR / f"{PRODUCT}_客户交付包.zip")
+    evidence_zip = make_evidence_package(OUTPUT_DIR / f"{RELEASE}_构建证据包.zip")
+    gui_evidence = OUTPUT_DIR / f"{RELEASE}_用户主流程GUI证据包.zip"
+    test_record = {
+        "release": RELEASE,
+        "build_commit": build_commit,
+        "build_branch": build_branch,
+        "dotnet_sdk_version": dotnet_sdk_version,
+        "build_architecture": build_architecture,
+        "build_mode": "release",
+        "source": "current_build",
+    }
 
     with zipfile.ZipFile(gui_evidence, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         archive.writestr(
@@ -575,10 +606,10 @@ def main() -> int:
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    license_admin_exe = build_license_admin_exe(ROOT / LICENSE_ADMIN_EXE_NAME)
-    license_admin_zip = build_license_admin_package(ROOT / f"{Path(LICENSE_ADMIN_EXE_NAME).stem}.zip")
+    license_admin_exe = build_license_admin_exe(OUTPUT_DIR / LICENSE_ADMIN_EXE_NAME)
+    license_admin_zip = build_license_admin_package(OUTPUT_DIR / f"{Path(LICENSE_ADMIN_EXE_NAME).stem}.zip")
 
-    report = ROOT / "HF4.1-R1.2_最终构建报告.md"
+    report = OUTPUT_DIR / f"{RELEASE}_最终构建报告.md"
     report.write_text(
         f"# {RELEASE} \u6700\u7ec8\u6784\u5efa\u62a5\u544a\n\n"
         f"\u6784\u5efa\u65f6\u95f4\uff1a{now}\n\n"
@@ -596,7 +627,7 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    self_review = ROOT / "HF4.1-R1.2_最终自检报告.md"
+    self_review = OUTPUT_DIR / f"{RELEASE}_最终自检报告.md"
     self_review.write_text(
         f"# {RELEASE} \u6700\u7ec8\u81ea\u68c0\u62a5\u544a\n\n"
         f"\u5f53\u524d\u72b6\u6001\uff1a`{STATUS}`\n\n"
@@ -619,11 +650,15 @@ def main() -> int:
         "test_record": test_record,
         "status": STATUS,
     }
-    (ROOT / "HF4.1-R1.2_upload_manifest.json").write_text(
+    upload_manifest = OUTPUT_DIR / f"{RELEASE}_upload_manifest.json"
+    upload_manifest.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    write_sha256s([setup, customer_zip, source_zip, license_admin_exe, license_admin_zip, ROOT / "HF4.1-R1.2_upload_manifest.json"])
+    write_sha256s(
+        [setup, customer_zip, source_zip, license_admin_exe, license_admin_zip, upload_manifest],
+        OUTPUT_DIR / "SHA256SUMS.txt",
+    )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0
 
