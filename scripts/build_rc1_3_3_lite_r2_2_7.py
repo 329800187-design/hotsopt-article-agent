@@ -643,12 +643,18 @@ def main() -> int:
         "release": RELEASE,
         "created_at": now,
         "setup": {"filename": setup.name, "sha256": sha256(setup), "size": setup.stat().st_size},
-        "customer_package": {"filename": customer_zip.name, "sha256": sha256(customer_zip)},
-        "source": {"filename": source_zip.name, "sha256": sha256(source_zip)},
+        "windows_runtime": {
+            "filename": windows_zip.name,
+            "sha256": sha256(windows_zip),
+            "size": windows_zip.stat().st_size,
+            "zip_file_count": len(zipfile.ZipFile(windows_zip).namelist()),
+        },
+        "customer_package": {"filename": customer_zip.name, "sha256": sha256(customer_zip), "size": customer_zip.stat().st_size},
+        "source": {"filename": source_zip.name, "sha256": sha256(source_zip), "size": source_zip.stat().st_size},
         "license_admin_zip": {"filename": license_admin_zip.name, "sha256": sha256(license_admin_zip), "size": license_admin_zip.stat().st_size},
         "license_admin_exe": {"filename": license_admin_exe.name, "sha256": sha256(license_admin_exe), "size": license_admin_exe.stat().st_size},
-        "evidence_package": {"filename": evidence_zip.name, "sha256": sha256(evidence_zip)},
-        "user_flow_gui_evidence_package": {"filename": gui_evidence.name, "sha256": sha256(gui_evidence)},
+        "evidence_package": {"filename": evidence_zip.name, "sha256": sha256(evidence_zip), "size": evidence_zip.stat().st_size},
+        "user_flow_gui_evidence_package": {"filename": gui_evidence.name, "sha256": sha256(gui_evidence), "size": gui_evidence.stat().st_size},
         "install_uninstall_check": install_check,
         "test_record": test_record,
         "status": STATUS,
@@ -659,7 +665,7 @@ def main() -> int:
         encoding="utf-8",
     )
     write_sha256s(
-        [setup, customer_zip, source_zip, license_admin_exe, license_admin_zip, upload_manifest],
+        [setup, windows_zip, customer_zip, source_zip, evidence_zip, gui_evidence, license_admin_exe, license_admin_zip, upload_manifest],
         OUTPUT_DIR / "SHA256SUMS.txt",
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
