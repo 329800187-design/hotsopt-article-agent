@@ -322,7 +322,7 @@ jobs:
         if: inputs.draft_release == true && steps.release_assets.outcome == 'success'
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           RELEASE_TAG: r2.2.20-retest-571a5a61
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
           RELEASE_TITLE: RC1.3.3-Lite-R2.2.20 Windows 用户复测包
