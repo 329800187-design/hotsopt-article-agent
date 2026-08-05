@@ -283,7 +283,7 @@ jobs:
 
       - name: Prepare Draft Release assets
         id: release_assets
-        if: (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.final_gate.outcome == 'success'
+        if: ${{ (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.final_gate.outcome == 'success' }}
         shell: pwsh
         env:
           SOURCE_SHA: ${{ inputs.source_sha || '571a5a611eb85b6a19575c2aad14253feae50237' }}
@@ -319,7 +319,7 @@ jobs:
 
       - name: Create or update Draft Release and upload assets
         id: draft_release_upload
-        if: (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.release_assets.outcome == 'success'
+        if: ${{ (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.release_assets.outcome == 'success' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
@@ -341,7 +341,7 @@ jobs:
 
       - name: Download and verify Draft Release assets
         id: draft_release_download_verify
-        if: (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.draft_release_upload.outcome == 'success'
+        if: ${{ (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.draft_release_upload.outcome == 'success' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -380,7 +380,7 @@ $process = Start-Process -FilePath (Join-Path $download "_RC1.3.3-Lite-R2.2.20_S
           @("PACKAGE_DOWNLOAD_VERIFIED=true", "source_commit=$env:SOURCE_SHA", "release_tag=$env:RELEASE_TAG") | Set-Content -Encoding UTF8 artifacts/windows-ci/release-download-verification.txt
 
       - name: Upload Windows diagnostic evidence
-        if: always() && !(inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]'))
+        if: ${{ always() && inputs.draft_release != true && !contains(github.event.head_commit.message, '[draft-release]') }}
         uses: actions/upload-artifact@v4
         with:
           name: windows-delivery-evidence-${{ github.run_number }}
