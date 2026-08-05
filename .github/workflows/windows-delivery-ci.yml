@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.source_sha || github.sha }}
+          ref: ${{ inputs.source_sha || '571a5a611eb85b6a19575c2aad14253feae50237' }}
 
       - name: Verify branch, commit and freeze tag
         id: git_verify
@@ -50,7 +50,7 @@ jobs:
           New-Item -ItemType Directory -Force artifacts/windows-ci | Out-Null
           $ErrorActionPreference = "Stop"
           $head = git rev-parse HEAD
-          $expected = "${{ inputs.source_sha || github.sha }}"
+          $expected = "${{ inputs.source_sha || '571a5a611eb85b6a19575c2aad14253feae50237' }}"
           $freeze = git rev-parse "freeze-r1.2-before-research-fix^{}"
           @(
             "head=$head"
@@ -283,10 +283,10 @@ jobs:
 
       - name: Prepare Draft Release assets
         id: release_assets
-        if: inputs.draft_release == true && steps.final_gate.outcome == 'success'
+        if: (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.final_gate.outcome == 'success'
         shell: pwsh
         env:
-          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || '571a5a611eb85b6a19575c2aad14253feae50237' }}
           RELEASE_TAG: r2.2.20-retest-571a5a61
         run: |
           $ErrorActionPreference = "Stop"
@@ -319,12 +319,12 @@ jobs:
 
       - name: Create or update Draft Release and upload assets
         id: draft_release_upload
-        if: inputs.draft_release == true && steps.release_assets.outcome == 'success'
+        if: (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.release_assets.outcome == 'success'
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           RELEASE_TAG: r2.2.20-retest-571a5a61
-          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || '571a5a611eb85b6a19575c2aad14253feae50237' }}
           RELEASE_TITLE: RC1.3.3-Lite-R2.2.20 Windows 用户复测包
         run: |
           $ErrorActionPreference = "Stop"
@@ -341,12 +341,12 @@ jobs:
 
       - name: Download and verify Draft Release assets
         id: draft_release_download_verify
-        if: inputs.draft_release == true && steps.draft_release_upload.outcome == 'success'
+        if: (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.draft_release_upload.outcome == 'success'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: r2.2.20-retest-571a5a61
-          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || '571a5a611eb85b6a19575c2aad14253feae50237' }}
         run: |
           $ErrorActionPreference = "Stop"
           $download = Join-Path (Get-Location) "release-download"
@@ -380,7 +380,7 @@ $process = Start-Process -FilePath (Join-Path $download "_RC1.3.3-Lite-R2.2.20_S
           @("PACKAGE_DOWNLOAD_VERIFIED=true", "source_commit=$env:SOURCE_SHA", "release_tag=$env:RELEASE_TAG") | Set-Content -Encoding UTF8 artifacts/windows-ci/release-download-verification.txt
 
       - name: Upload Windows diagnostic evidence
-        if: always() && inputs.draft_release != true
+        if: always() && !(inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]'))
         uses: actions/upload-artifact@v4
         with:
           name: windows-delivery-evidence-${{ github.run_number }}
