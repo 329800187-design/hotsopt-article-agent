@@ -298,9 +298,13 @@ jobs:
           }
           $report = Join-Path (Get-Location) "WINDOWS_BUILD_TEST_REPORT.txt"
           Copy-Item artifacts/windows-ci/pytest-windows.txt $report -Force
+          $releaseNames = @("_RC1.3.3-Lite-R2.2.20_Setup.exe", "_RC1.3.3-Lite-R2.2.20_Windows.zip", "_RC1.3.3-Lite-R2.2.20_.zip")
+          $i = 0
           $sumLines = foreach ($file in @($setup, $runtime, $customer)) {
             $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
-            "{0}  {1}" -f $hash, $file.Name
+            $line = "{0}  {1}" -f $hash, $releaseNames[$i]
+            $i++
+            $line
           }
           $sumLines | Set-Content -Encoding UTF8 SHA256SUMS.txt
           $manifest = [ordered]@{
@@ -309,9 +313,9 @@ jobs:
             source_commit = $env:SOURCE_SHA
             branch = "fix/r2.2.20-image-export-e2e"
             artifacts = @(
-              [ordered]@{ filename = $setup.Name; size = $setup.Length; sha256 = (Get-FileHash -Algorithm SHA256 $setup.FullName).Hash.ToLowerInvariant() }
-              [ordered]@{ filename = $runtime.Name; size = $runtime.Length; sha256 = (Get-FileHash -Algorithm SHA256 $runtime.FullName).Hash.ToLowerInvariant() }
-              [ordered]@{ filename = $customer.Name; size = $customer.Length; sha256 = (Get-FileHash -Algorithm SHA256 $customer.FullName).Hash.ToLowerInvariant() }
+              [ordered]@{ filename = $releaseNames[0]; size = $setup.Length; sha256 = (Get-FileHash -Algorithm SHA256 $setup.FullName).Hash.ToLowerInvariant() }
+              [ordered]@{ filename = $releaseNames[1]; size = $runtime.Length; sha256 = (Get-FileHash -Algorithm SHA256 $runtime.FullName).Hash.ToLowerInvariant() }
+              [ordered]@{ filename = $releaseNames[2]; size = $customer.Length; sha256 = (Get-FileHash -Algorithm SHA256 $customer.FullName).Hash.ToLowerInvariant() }
             )
           }
           $manifest | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 DELIVERY_MANIFEST.json
