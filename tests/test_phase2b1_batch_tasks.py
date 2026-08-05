@@ -149,7 +149,9 @@ def test_each_child_has_one_future(tmp_path, monkeypatch):
     executor = BatchExecutor(store)
     task_id = batch["items"][0]["task"]["task_id"]
     executor.start_batch(batch["batch_id"])
-    time.sleep(0.03)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and executor.is_task_active(task_id):
+        time.sleep(0.03)
     assert not executor.is_task_active(task_id) or task_id not in executor._active
 
 
