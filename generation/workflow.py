@@ -7,6 +7,7 @@ explicit review gates the customer must pass before a deliverable is made.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from copy import deepcopy
 from typing import Any, Iterable
 
 from providers.text_provider import ProviderError
@@ -42,6 +43,27 @@ def _image_items(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 def completed_image_items(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in _image_items(state) if item.get("status") == "completed" and (item.get("path") or item.get("file_path"))]
+
+
+def image_workflow_gate(state: dict[str, Any] | None) -> dict[str, Any]:
+    """Return an explicit customer-facing image gate instead of hiding actions."""
+    value = state or {}
+    reasons: list[str] = []
+    if not value.get("article"):
+        reasons.append("文章正文尚未生成完成")
+    if str(value.get("status") or "") not in {"completed", "partial_success", "review_required"}:
+        reasons.append("文章任务尚未完成")
+    gate = value.get("quality_gate") or {}
+    if str(gate.get("status") or "") not in {"passed", "warning"} or int(gate.get("hard_error_count") or 0) > 0:
+        reasons.append("文章质量检查尚未通过")
+    workflow_state = str(initialize_workflow(value).get("workflow_state") or "")
+    if workflow_state == "article_pending_confirmation":
+        reasons.append("请先确认文章内容")
+    elif workflow_state not in {"article_confirmed", "images_pending_generation", "images_generating", "images_pending_confirmation", "fusion_pending", "final_draft_pending_preview", "final_draft_confirmed", "export_ready", "exported"}:
+        reasons.append(f"当前流程阶段为 {workflow_state or '未知'}")
+    if workflow_state in {"images_pending_confirmation", "fusion_pending", "final_draft_pending_preview", "final_draft_confirmed", "export_ready", "exported"} and not completed_image_items(value):
+        reasons.append("没有可用的已生成图片")
+    return {"ready": not reasons, "workflow_state": workflow_state, "reasons": reasons}
 
 
 def sync_article_images(state: dict[str, Any]) -> dict[str, Any]:
@@ -142,6 +164,11 @@ def confirm_images(state: dict[str, Any], image_ids: Iterable[str] | None = None
 def prepare_fusion(state: dict[str, Any]) -> dict[str, Any]:
     require_workflow(state, ("fusion_pending", "final_draft_pending_preview", "final_draft_confirmed", "export_ready"), "FUSION_CONFIRMATION_REQUIRED")
     sync_article_images(state)
+    final_document = deepcopy(state.get("article") or {})
+    final_document["images"] = [deepcopy(item) for item in completed_image_items(state)]
+    final_document["document_kind"] = "final_document"
+    final_document["generated_at"] = _now()
+    state["final_document"] = final_document
     state["fusion_status"] = {"status": "preview_ready", "prepared_at": _now(), "model_calls": 0}
     set_workflow_state(state, "final_draft_pending_preview")
     return state
@@ -161,6 +188,8 @@ def require_export_ready(state: dict[str, Any]) -> None:
         raise ProviderError("FINAL_DRAFT_NOT_READY", "请先生成最终图文稿预览")
     if (state.get("final_draft_status") or {}).get("status") != "confirmed":
         raise ProviderError("FINAL_DRAFT_NOT_READY", "请先确认最终图文稿")
+    if not isinstance(state.get("final_document"), dict):
+        raise ProviderError("FINAL_DOCUMENT_MISSING", "最终图文稿尚未生成，请重新生成最终图文稿预览")
 
 
 def mark_exported(state: dict[str, Any], kind: str) -> dict[str, Any]:

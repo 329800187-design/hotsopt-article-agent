@@ -1,34 +1,32 @@
 # Delivery Status
 
-Branch: `fix/r1.3-customer-delivery-final`
+Branch: `fix/r2.2.20-image-export-e2e`
 
-Version: `RC1.3.3-Lite-R2.2.8`
+Version: `RC1.3.3-Lite-R2.2.20`
 
-Freeze baseline: `freeze-r1.2-before-research-fix` -> `0f827b4e54f8018a0cbdf71cabfca60c07f10c18`
+Baseline: `362c6ab23fc0f0b48cf63b5855201a21cf2d7850`
 
-Current phase: Issue #1 automated repair and Windows CI complete; real Windows activation validation pending.
+R2.2.19 user retest: `FAIL`.
 
-## Issue #1 completed locally
+## R2.2.20 source repair
 
-- Unified every normal Windows entry point on `%LOCALAPPDATA%\热点图文批量生产工作台`.
-- Added guarded, identity-preserving migration from the old short LocalAppData directory and repository `data`.
-- Added stable device-identity error codes and safe diagnostics without identity, license, credential, or key material.
-- Repaired signer launch priority: Chinese EXE, legacy English EXE, `.venv`, `py -3`, then system Python.
-- Added signer private/public key preflight and strict mismatch rejection.
-- Centralized release metadata in `modules/app_metadata.py`.
-- Mac full suite: `938 passed, 18 skipped`; security: `SECURITY_SCAN_PASS`.
-- Windows CI run `30622596471` attempt 2: `953 passed, 3 skipped`; all automated delivery gates passed.
+- Completed articles now expose a prominent `继续完成图文` action.
+- Article confirmation leads to a selectable 1–5 image plan and paid-call confirmation.
+- Image confirmation persists an independent `final_document` used by Word and ZIP export.
+- Batch export remains gated until every article has a confirmed final document.
+- Export failures return the failed stage, article title, safe Chinese reason, retry action, and persisted diagnostic log ID.
+- Repository-level .NET SDK selection is pinned to 8.0.423 and the Windows gate records the resolved executable and installed SDKs.
+- Mac full suite: `1035 passed, 18 skipped`; security: `SECURITY_SCAN_PASS`.
 
-## Pending Windows real validation
+## Pending
 
-- Source and installed device-code generation under a standard non-admin account.
-- Device-code stability across complete process restart.
-- Real DPAPI persistence and MachineGuid/CIM fallback.
-- Original production private-key restoration and real public/private match.
-- Real license signing, client activation, restricted-mode release, text generation, and two-image acceptance.
-
-Issue #1 remains open.
+- GitHub Windows CI package, Setup install/uninstall, and artifact gates for R2.2.20.
+- Windows installed-build user retest of article → images → fusion preview → Word/ZIP.
 
 BUILD_ALLOWED=false
+
+READY_FOR_PACKAGE_BUILD=false
+
+READY_FOR_USER_RETEST=false
 
 CUSTOMER_DELIVERY_ALLOWED=false

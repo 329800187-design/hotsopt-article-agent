@@ -10,6 +10,7 @@ import json
 import shutil
 import threading
 import time
+import traceback
 from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,7 +25,7 @@ from hot_sources.service import HotTrendService
 from hot_sources.classifier import CATEGORIES
 from hot_sources.commercial_filter import blocked_topic_reason
 from modules.config_store import load_settings
-from modules.app_paths import data_root, exports_root, model_test_root, research_root, tasks_root
+from modules.app_paths import data_root, exports_root, logs_root, model_test_root, research_root, tasks_root
 
 # ── API 日志初始化：写入 data_root/logs/api.log ──
 # 桌面环境（desktop_host.py 设置 HOTSPOT_DESKTOP=1）下初始化完整日志；
@@ -1151,10 +1152,10 @@ def _prepare_final_draft(task_id: str) -> dict[str, Any]:
     def action(state: dict[str, Any]) -> None:
         initialize_workflow(state)
         prepare_fusion(state)
-        article = prepare_article_layout(state.get("article") or {})
+        article = prepare_article_layout(state.get("final_document") or state.get("article") or {})
         if article.get("layout_status") != "passed" or not (article.get("layout_check") or {}).get("passed"):
             raise ProviderError("ARTICLE_LAYOUT_REQUIRED", "文章排版检查未通过，暂不能生成最终图文稿")
-        state["article"] = sanitize_sensitive_data(article)
+        state["final_document"] = sanitize_sensitive_data(article)
 
     return _save_workflow_action(task_id, action)
 
@@ -1284,7 +1285,7 @@ def _ensure_state_article_ready_for_export(state: dict[str, Any] | None) -> dict
         require_export_ready(state)
     if state.get("status") not in EXPORTABLE_ARTICLE_STATUSES or state.get("rewrite_requested"):
         raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
-    article = state.get("article")
+    article = state.get("final_document") if state.get("workflow_state") not in {None, "article_draft"} else state.get("article")
     if not isinstance(article, dict):
         raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
     try:
@@ -1308,6 +1309,34 @@ def _ensure_state_article_ready_for_export(state: dict[str, Any] | None) -> dict
     ):
         raise ProviderError("ARTICLE_NOT_READY", ARTICLE_NOT_READY_MESSAGE)
     return article
+
+
+def _export_failure(stage: str, title: str, exc: Exception, code: str) -> JSONResponse:
+    log_id = f"EXP-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8].upper()}"
+    safe_reason = redact_sensitive_text(str(getattr(exc, "detail", exc)) or "导出处理异常")
+    record = {
+        "log_id": log_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "stage": stage,
+        "article_title": title,
+        "error_code": str(getattr(exc, "code", code)),
+        "reason": safe_reason,
+        "exception_type": type(exc).__name__,
+        "traceback": redact_sensitive_text(traceback.format_exc()),
+    }
+    try:
+        target = logs_root() / "exports" / f"{log_id}.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(sanitize_sensitive_data(record), ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        _logger.exception("export diagnostic log write failed: %s", log_id)
+    return _error(
+        str(getattr(exc, "code", code)),
+        safe_reason,
+        {"stage": stage, "article_title": title, "reason": safe_reason, "log_id": log_id},
+        retryable=True,
+        status_code=409 if isinstance(exc, ProviderError) else 500,
+    )
 
 
 def _article_export(task_id: str, kind: str) -> FileResponse:
@@ -1351,9 +1380,11 @@ def export_task_word(task_id: str):
     try:
         return _article_export(task_id, "word")
     except ProviderError as exc:
-        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED", "ARTICLE_NOT_READY", "ARTICLE_META_CONTENT_LEAK"} else 400)
+        state = load_generation_task(task_id) or {}
+        return _export_failure("word", str((state.get("final_document") or state.get("article") or {}).get("title") or "未命名文章"), exc, "WORD_EXPORT_FAILED")
     except Exception as exc:
-        return _error("WORD_EXPORT_FAILED", "Word 导出失败", str(exc), retryable=True, status_code=400)
+        state = load_generation_task(task_id) or {}
+        return _export_failure("word", str((state.get("final_document") or state.get("article") or {}).get("title") or "未命名文章"), exc, "WORD_EXPORT_FAILED")
 
 
 @app.get("/api/tasks/{task_id}/export/zip")
@@ -1361,9 +1392,11 @@ def export_task_zip(task_id: str):
     try:
         return _article_export(task_id, "zip")
     except ProviderError as exc:
-        return _task_error_response(exc, 404 if exc.code in {"TASK_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"ARTICLE_NOT_FINAL", "ARTICLE_LAYOUT_REQUIRED", "ARTICLE_NOT_READY", "ARTICLE_META_CONTENT_LEAK"} else 400)
+        state = load_generation_task(task_id) or {}
+        return _export_failure("zip", str((state.get("final_document") or state.get("article") or {}).get("title") or "未命名文章"), exc, "ZIP_EXPORT_FAILED")
     except Exception as exc:
-        return _error("ZIP_EXPORT_FAILED", "ZIP 导出失败", str(exc), retryable=True, status_code=400)
+        state = load_generation_task(task_id) or {}
+        return _export_failure("zip", str((state.get("final_document") or state.get("article") or {}).get("title") or "未命名文章"), exc, "ZIP_EXPORT_FAILED")
 
 
 @app.get("/api/batches/{batch_id}/export/zip")
@@ -1390,9 +1423,11 @@ def export_batch_zip(batch_id: str):
         export_batch_bundle(articles, path, str(batch.get("batch_name") or "本次创作"))
         return FileResponse(path, media_type="application/zip", filename=f"{safe_filename(str(batch.get('batch_name') or '本次创作'))}.zip")
     except ProviderError as exc:
-        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"BATCH_NOT_FINAL", "ARTICLE_NOT_READY", "ARTICLE_META_CONTENT_LEAK"} else 400)
+        batch = batch_executor.store.get_batch(batch_id) or {}
+        return _export_failure("batch_zip", str(batch.get("batch_name") or "本次创作"), exc, "ZIP_EXPORT_FAILED")
     except Exception as exc:
-        return _error("ZIP_EXPORT_FAILED", "ZIP 导出失败", str(exc), retryable=True, status_code=400)
+        batch = batch_executor.store.get_batch(batch_id) or {}
+        return _export_failure("batch_zip", str(batch.get("batch_name") or "本次创作"), exc, "ZIP_EXPORT_FAILED")
 
 
 @app.get("/api/batches/{batch_id}/export/word")
@@ -1421,9 +1456,11 @@ def export_batch_word(batch_id: str):
         export_combined(articles, path)
         return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=f"{safe_filename(str(batch.get('batch_name') or '本次创作'))}.docx")
     except ProviderError as exc:
-        return _batch_error_response(exc, 404 if exc.code in {"BATCH_NOT_FOUND", "ARTICLE_NOT_AVAILABLE"} else 409 if exc.code in {"BATCH_NOT_FINAL", "ARTICLE_NOT_READY", "ARTICLE_META_CONTENT_LEAK"} else 400)
+        batch = batch_executor.store.get_batch(batch_id) or {}
+        return _export_failure("batch_word", str(batch.get("batch_name") or "本次创作"), exc, "WORD_EXPORT_FAILED")
     except Exception as exc:
-        return _error("WORD_EXPORT_FAILED", "Word 导出失败", str(exc), retryable=True, status_code=400)
+        batch = batch_executor.store.get_batch(batch_id) or {}
+        return _export_failure("batch_word", str(batch.get("batch_name") or "本次创作"), exc, "WORD_EXPORT_FAILED")
 
 
 def _batch_error_response(error: ProviderError | Exception, status_code: int = 400) -> JSONResponse:

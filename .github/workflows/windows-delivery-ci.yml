@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - fix/r1.3-customer-delivery-final
+      - fix/r2.2.20-image-export-e2e
 
 permissions:
   contents: read
@@ -44,7 +45,11 @@ jobs:
             "head=$head"
             "freeze_peeled=$freeze"
           ) | Set-Content -Encoding UTF8 artifacts/windows-ci/git-state.txt
-          if ($branch -ne "fix/r1.3-customer-delivery-final") {
+          $allowedBranches = @(
+            "fix/r1.3-customer-delivery-final",
+            "fix/r2.2.20-image-export-e2e"
+          )
+          if ($branch -notin $allowedBranches) {
             throw "WRONG_BRANCH: $branch"
           }
           if ($freeze -ne "0f827b4e54f8018a0cbdf71cabfca60c07f10c18") {
@@ -64,6 +69,23 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - name: Verify repository .NET 8 SDK selection
+        id: dotnet_verify
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dotnetPath = (Get-Command dotnet).Source
+          $resolved = dotnet --version
+          $installed = dotnet --list-sdks
+          @(
+            "dotnet_path=$dotnetPath"
+            "resolved_sdk=$resolved"
+            "installed_sdks:"
+            $installed
+          ) | Set-Content -Encoding UTF8 artifacts/windows-ci/dotnet-sdk.txt
+          if ($resolved -ne "8.0.423") { throw "DOTNET_8_SDK_RESOLUTION_FAILED: resolved=$resolved" }
 
       - name: Install Inno Setup
         id: inno_install
@@ -189,8 +211,8 @@ jobs:
           python scripts/package_rc1.py --report data/logs/windows_ci_report.txt 2>&1 | Tee-Object -FilePath artifacts/windows-ci/package-rc1.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Compile Inno Setup installer
-        id: inno_build
+      - name: Build and validate Windows delivery package
+        id: package_build
         if: always()
         shell: pwsh
         continue-on-error: true
@@ -236,12 +258,13 @@ jobs:
             git_verify = "${{ steps.git_verify.outcome }}"
             inno_install = "${{ steps.inno_install.outcome }}"
             dependencies = "${{ steps.dependencies.outcome }}"
+            dotnet_sdk = "${{ steps.dotnet_verify.outcome }}"
             compileall = "${{ steps.compileall.outcome }}"
             full_tests = "${{ steps.full_tests.outcome }}"
             security_scan = "${{ steps.security_scan.outcome }}"
             launcher_build = "${{ steps.launcher_build.outcome }}"
             portable_package = "${{ steps.portable_package.outcome }}"
-            inno_build = "${{ steps.inno_build.outcome }}"
+            package_build = "${{ steps.package_build.outcome }}"
           }
           $results.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" } |
             Set-Content -Encoding UTF8 artifacts/windows-ci/gate-results.txt

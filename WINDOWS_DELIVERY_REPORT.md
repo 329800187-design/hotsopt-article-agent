@@ -1,10 +1,10 @@
 # Windows 交付验证报告
 
-分支：`fix/r1.3-customer-delivery-final`
+分支：`fix/r2.2.20-image-export-e2e`
 
-版本：`RC1.3.3-Lite-R2.2.8`
+版本：`RC1.3.3-Lite-R2.2.20`
 
-状态：Issue #1 Mac 自动化修复与 Windows CI 完成；Windows Hermes 真实许可证闭环待执行。
+状态：R2.2.19 用户端图文与导出闭环复测失败；R2.2.20 源码修复完成后必须重新通过 Windows CI 和安装版用户复测。
 
 ## Issue #1 修复
 
@@ -23,14 +23,15 @@
 | 检查 | 结果 |
 |---|---|
 | compileall | PASS |
-| pytest 全量 | 938 passed, 0 failed, 18 skipped |
+| pytest 全量 | 1035 passed, 0 failed, 18 skipped |
+| R2.2.20 图文导出 E2E | 13 passed |
 | 迁移定向测试 | 4 passed |
 | 签发定向测试 | 4 passed |
 | 安全扫描 | SECURITY_SCAN_PASS；forbidden_hits=[] |
 
 证据位于 `data/logs/issue_1_mac_*.txt/json` 和 `data/logs/issue_1_*_tests.txt`。
 
-## Windows CI
+## 历史 Windows CI（不可替代 R2.2.20 验证）
 
 [Windows Delivery CI run 30622596471（attempt 2）](https://github.com/329800187-design/hotsopt-article-agent/actions/runs/30622596471) 已通过：
 
@@ -41,6 +42,8 @@
 - Inno Setup build/install/uninstall：PASS
 - Windows 已安装应用入口：PASS
 - 卸载保留用户数据：PASS
+
+R2.2.20 的 Windows CI、安装包和安装版用户复测仍待执行。
 
 ## PENDING_WINDOWS_REAL_VALIDATION
 
@@ -56,5 +59,9 @@
 Issue #1 保持打开。
 
 BUILD_ALLOWED=false
+
+READY_FOR_PACKAGE_BUILD=false
+
+READY_FOR_USER_RETEST=false
 
 CUSTOMER_DELIVERY_ALLOWED=false

@@ -1,26 +1,22 @@
 # Delivery Blockers
 
-## Active blockers
+## Current blockers
 
-1. `PENDING_WINDOWS_REAL_VALIDATION`: source checkout must generate and retain one device code as a standard Windows user.
-2. `PENDING_WINDOWS_REAL_VALIDATION`: installed build must use the same official LocalAppData root and retain its device code across full restarts.
-3. `PENDING_WINDOWS_REAL_VALIDATION`: real DPAPI and MachineGuid/CIM behavior cannot be proven on Mac.
-4. The original production signing private key must be restored outside Git and match the shipped client public key.
-5. A real license must be signed, activated by the client, and remain active after restart.
-6. Restricted mode must unlock model configuration only after valid activation.
-7. Real text generation and two generated images still require Windows/customer acceptance.
+1. R2.2.20 has not yet completed GitHub Windows CI and Setup build/install/uninstall validation.
+2. The customer has not yet retested the complete installed flow: article confirmation, 1–5 images, image confirmation, final-document preview, Word, and ZIP.
+3. A real exported DOCX must be opened on Windows and verified to contain the article body and selected images.
 
-## Automated evidence
+## Mac evidence
 
-- Mac compileall: PASS.
-- Mac pytest: `938 passed, 18 skipped`.
-- Mac security scan: `SECURITY_SCAN_PASS`, no forbidden hits.
-- Migration tests: `4 passed`.
-- Signer tests: `4 passed`.
-- Windows CI run `30622596471` attempt 2: `953 passed, 3 skipped`; security, launcher, portable, Inno Setup, install, uninstall, and preserved-user-data gates passed.
-
-Issue #1 must remain open until the real Windows activation closure is complete.
+- compileall: PASS
+- pytest: `1035 passed, 18 skipped`
+- R2.2.20 image/export E2E: `13 passed`
+- security: `SECURITY_SCAN_PASS`, `forbidden_hits=[]`
 
 BUILD_ALLOWED=false
+
+READY_FOR_PACKAGE_BUILD=false
+
+READY_FOR_USER_RETEST=false
 
 CUSTOMER_DELIVERY_ALLOWED=false

@@ -43,16 +43,22 @@ def sha256(path: Path) -> str:
 
 def require_dotnet_sdk() -> str:
     try:
-        version = subprocess.check_output(
-            ["dotnet", "--version"], cwd=ROOT, text=True, stderr=subprocess.STDOUT
-        ).strip()
         installed = subprocess.check_output(
             ["dotnet", "--list-sdks"], cwd=ROOT, text=True, stderr=subprocess.STDOUT
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise RuntimeError("DOTNET_8_SDK_REQUIRED") from exc
-    if not version.startswith("8.") or not any(line.strip().startswith("8.") for line in installed.splitlines()):
-        raise RuntimeError(f"DOTNET_8_SDK_REQUIRED: version={version!r}")
+    installed_versions = [line.split()[0].strip() for line in installed.splitlines() if line.strip()]
+    dotnet8 = [value for value in installed_versions if value.startswith("8.")]
+    if not dotnet8:
+        raise RuntimeError(f"DOTNET_8_SDK_REQUIRED: installed={installed_versions!r}")
+    version = subprocess.check_output(
+        ["dotnet", "--version"], cwd=ROOT, text=True, stderr=subprocess.STDOUT
+    ).strip()
+    if not version.startswith("8."):
+        raise RuntimeError(f"DOTNET_8_SDK_RESOLUTION_FAILED: resolved={version!r}, installed={installed_versions!r}, cwd={str(ROOT)!r}")
+    dotnet_path = shutil.which("dotnet") or "dotnet"
+    print(json.dumps({"dotnet_path": dotnet_path, "resolved_sdk": version, "installed_sdks": installed_versions}, ensure_ascii=False))
     return version
 
 

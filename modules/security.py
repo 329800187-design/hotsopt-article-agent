@@ -28,6 +28,7 @@ _AUTH_VALUE_PATTERN = re.compile(
     re.I,
 )
 _BEARER_PATTERN = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I)
+_API_KEY_VALUE_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b")
 
 
 def _normalized_key(key: Any) -> str:
@@ -61,6 +62,7 @@ def redact_sensitive_text(value: Any) -> str:
     text = str(value or "")
     text = _URL_CREDENTIAL_PATTERN.sub(r"\1***:***@", text)
     text = _BEARER_PATTERN.sub("Bearer [REDACTED]", text)
+    text = _API_KEY_VALUE_PATTERN.sub("[REDACTED]", text)
     text = _AUTH_VALUE_PATTERN.sub(r"\1[REDACTED]", text)
     return text
 
