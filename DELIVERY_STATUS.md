@@ -18,14 +18,19 @@ R2.2.19 user retest: `FAIL`.
 - Repository-level .NET SDK selection is pinned to 8.0.423 and the Windows gate records the resolved executable and installed SDKs.
 - Mac full suite: `1035 passed, 18 skipped`; security: `SECURITY_SCAN_PASS`.
 
+## Windows CI result
+
+- [Run 30985083335](https://github.com/329800187-design/hotsopt-article-agent/actions/runs/30985083335): .NET 8.0.423 selection, 1050-test Windows suite, security scan, launcher, portable package, installer package, inventory, and delivery gates all passed.
+- The job conclusion is failed only because GitHub Actions artifact storage quota (7.53 GB across 38 retained artifacts) rejected the final evidence upload.
+- No R2.2.20 installer is downloadable from that run until repository artifact capacity is released and CI is rerun.
+
 ## Pending
 
-- GitHub Windows CI package, Setup install/uninstall, and artifact gates for R2.2.20.
 - Windows installed-build user retest of article → images → fusion preview → Word/ZIP.
 
-BUILD_ALLOWED=false
+BUILD_ALLOWED=true
 
-READY_FOR_PACKAGE_BUILD=false
+READY_FOR_PACKAGE_BUILD=true
 
 READY_FOR_USER_RETEST=false
 

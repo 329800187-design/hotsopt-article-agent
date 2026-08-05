@@ -24,14 +24,30 @@
 |---|---|
 | compileall | PASS |
 | pytest 全量 | 1035 passed, 0 failed, 18 skipped |
-| R2.2.20 图文导出 E2E | 13 passed |
+| R2.2.20 图文导出 E2E | 15 passed |
 | 迁移定向测试 | 4 passed |
 | 签发定向测试 | 4 passed |
 | 安全扫描 | SECURITY_SCAN_PASS；forbidden_hits=[] |
 
 证据位于 `data/logs/issue_1_mac_*.txt/json` 和 `data/logs/issue_1_*_tests.txt`。
 
-## 历史 Windows CI（不可替代 R2.2.20 验证）
+## R2.2.20 Windows CI
+
+[Windows Delivery CI run 30985083335](https://github.com/329800187-design/hotsopt-article-agent/actions/runs/30985083335)：
+
+- pytest：`1050 passed, 0 failed, 3 skipped`
+- `SECURITY_SCAN_PASS`
+- 仓库根目录解析 .NET SDK：`8.0.423`（同时安装 10.0.302 不再误判）
+- 原生 Launcher：PASS
+- Portable package：PASS
+- Windows delivery package：PASS
+- 制品清单：PASS
+- 最终构建门禁：全部 PASS
+- GitHub artifact 上传：FAIL，仅因为仓库制品存储额度已满
+
+该运行真实生成了 R2.2.20 Setup、Windows 运行包和客户交付包，但上传失败后运行机已销毁，当前没有可下载的 R2.2.20 安装包。必须释放 GitHub Actions 制品额度后重跑。
+
+## 历史 Windows CI
 
 [Windows Delivery CI run 30622596471（attempt 2）](https://github.com/329800187-design/hotsopt-article-agent/actions/runs/30622596471) 已通过：
 
@@ -42,8 +58,6 @@
 - Inno Setup build/install/uninstall：PASS
 - Windows 已安装应用入口：PASS
 - 卸载保留用户数据：PASS
-
-R2.2.20 的 Windows CI、安装包和安装版用户复测仍待执行。
 
 ## PENDING_WINDOWS_REAL_VALIDATION
 
@@ -58,9 +72,9 @@ R2.2.20 的 Windows CI、安装包和安装版用户复测仍待执行。
 
 Issue #1 保持打开。
 
-BUILD_ALLOWED=false
+BUILD_ALLOWED=true
 
-READY_FOR_PACKAGE_BUILD=false
+READY_FOR_PACKAGE_BUILD=true
 
 READY_FOR_USER_RETEST=false
 

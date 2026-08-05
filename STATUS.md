@@ -23,11 +23,11 @@
 
 当前测试结果以本轮实际运行记录为准，并写入最终验收报告、Codex 自行复检报告和 upload_manifest.json。
 
-`RC1.3.3-Lite-R2.2.20 已完成配图入口、图文融合和 Word/ZIP 导出端到端源码修复，等待 Windows CI 与用户复测`
+`RC1.3.3-Lite-R2.2.20 源码修复和 Windows 构建门禁已通过；GitHub 制品额度已满导致安装包未能上传，等待释放额度、重跑和用户复测`
 
 R2.2.19 用户复测：`FAIL`。
 
-READY_FOR_PACKAGE_BUILD=false
+READY_FOR_PACKAGE_BUILD=true
 
 READY_FOR_USER_RETEST=false
 

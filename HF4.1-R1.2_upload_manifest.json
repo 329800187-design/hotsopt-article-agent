@@ -2,7 +2,7 @@
   "release": "RC1.3.3-Lite-R2.2.20",
   "status": "CUSTOMER_DELIVERY_BLOCKED",
   "artifacts": [],
-  "ready_for_package_build": false,
+  "ready_for_package_build": true,
   "ready_for_user_retest": false,
   "customer_delivery_allowed": false
 }
