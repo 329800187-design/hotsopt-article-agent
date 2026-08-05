@@ -344,7 +344,7 @@ jobs:
         if: ${{ (inputs.draft_release == true || contains(github.event.head_commit.message, '[draft-release]')) && steps.draft_release_upload.outcome == 'success' }}
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           RELEASE_TAG: r2.2.20-retest-571a5a61
           SOURCE_SHA: ${{ inputs.source_sha || '571a5a611eb85b6a19575c2aad14253feae50237' }}
         run: |
@@ -353,9 +353,9 @@ jobs:
           New-Item -ItemType Directory -Force $download | Out-Null
           gh release download $env:RELEASE_TAG --dir $download
           $expected = @(
-  "_RC1.3.3-Lite-R2.2.20_Setup.exe",
-  "_RC1.3.3-Lite-R2.2.20_Windows.zip",
-  "_RC1.3.3-Lite-R2.2.20_.zip",
+            "_RC1.3.3-Lite-R2.2.20_Setup.exe",
+            "_RC1.3.3-Lite-R2.2.20_Windows.zip",
+            "_RC1.3.3-Lite-R2.2.20_.zip",
             "SHA256SUMS.txt",
             "DELIVERY_MANIFEST.json",
             "WINDOWS_BUILD_TEST_REPORT.txt"
@@ -373,9 +373,9 @@ jobs:
           }
           $manifest = Get-Content (Join-Path $download "DELIVERY_MANIFEST.json") -Raw | ConvertFrom-Json
           if ($manifest.source_commit -ne $env:SOURCE_SHA) { throw "RELEASE_MANIFEST_SOURCE_MISMATCH" }
-Expand-Archive -Path (Join-Path $download "_RC1.3.3-Lite-R2.2.20_Windows.zip") -DestinationPath (Join-Path $download "runtime-expanded") -Force
-Expand-Archive -Path (Join-Path $download "_RC1.3.3-Lite-R2.2.20_.zip") -DestinationPath (Join-Path $download "customer-expanded") -Force
-$process = Start-Process -FilePath (Join-Path $download "_RC1.3.3-Lite-R2.2.20_Setup.exe") -ArgumentList "/?" -Wait -PassThru
+          Expand-Archive -Path (Join-Path $download "_RC1.3.3-Lite-R2.2.20_Windows.zip") -DestinationPath (Join-Path $download "runtime-expanded") -Force
+          Expand-Archive -Path (Join-Path $download "_RC1.3.3-Lite-R2.2.20_.zip") -DestinationPath (Join-Path $download "customer-expanded") -Force
+          $process = Start-Process -FilePath (Join-Path $download "_RC1.3.3-Lite-R2.2.20_Setup.exe") -ArgumentList "/?" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "RELEASE_SETUP_START_FAILED: exit=$($process.ExitCode)" }
           @("PACKAGE_DOWNLOAD_VERIFIED=true", "source_commit=$env:SOURCE_SHA", "release_tag=$env:RELEASE_TAG") | Set-Content -Encoding UTF8 artifacts/windows-ci/release-download-verification.txt
 
