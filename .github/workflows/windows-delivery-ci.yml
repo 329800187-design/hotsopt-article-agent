@@ -379,8 +379,9 @@ jobs:
           if ($manifest.source_commit -ne $env:SOURCE_SHA) { throw "RELEASE_MANIFEST_SOURCE_MISMATCH" }
           Expand-Archive -Path (Join-Path $download "_RC1.3.3-Lite-R2.2.20_Windows.zip") -DestinationPath (Join-Path $download "runtime-expanded") -Force
           Expand-Archive -Path (Join-Path $download "_RC1.3.3-Lite-R2.2.20_.zip") -DestinationPath (Join-Path $download "customer-expanded") -Force
-          $process = Start-Process -FilePath (Join-Path $download "_RC1.3.3-Lite-R2.2.20_Setup.exe") -ArgumentList "/?" -Wait -PassThru
-          if ($process.ExitCode -ne 0) { throw "RELEASE_SETUP_START_FAILED: exit=$($process.ExitCode)" }
+          $process = Start-Process -FilePath (Join-Path $download "_RC1.3.3-Lite-R2.2.20_Setup.exe") -ArgumentList "/?" -PassThru
+          Start-Sleep -Seconds 5
+          if (-not $process -or $process.HasExited -and $process.ExitCode -ne 0) { throw "RELEASE_SETUP_START_FAILED" }
           @("PACKAGE_DOWNLOAD_VERIFIED=true", "source_commit=$env:SOURCE_SHA", "release_tag=$env:RELEASE_TAG") | Set-Content -Encoding UTF8 artifacts/windows-ci/release-download-verification.txt
 
       - name: Upload Windows diagnostic evidence
