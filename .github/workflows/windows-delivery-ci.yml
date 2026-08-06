@@ -382,7 +382,9 @@ jobs:
           @("PACKAGE_DOWNLOAD_VERIFIED=true", "source_commit=$env:SOURCE_SHA", "release_tag=$env:RELEASE_TAG") | Set-Content -Encoding UTF8 artifacts/windows-ci/release-download-verification.txt
 
       - name: Upload Windows diagnostic evidence
-        if: ${{ always() && inputs.draft_release != true && !contains(github.event.head_commit.message, '[draft-release]') }}
+        # Actions artifact storage is quota-blocked; required evidence is
+        # retained in the Draft Release assets instead.
+        if: ${{ false }}
         uses: actions/upload-artifact@v4
         with:
           name: windows-delivery-evidence-${{ github.run_number }}
