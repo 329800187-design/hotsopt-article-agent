@@ -6,6 +6,7 @@ on:
     branches:
       - fix/r1.3-customer-delivery-final
       - fix/r2.2.20-image-export-e2e
+      - hotfix/r2.2.20-hf1-minimal-delivery
 
 permissions:
   contents: read
@@ -48,6 +49,7 @@ jobs:
           $allowedBranches = @(
             "fix/r1.3-customer-delivery-final",
             "fix/r2.2.20-image-export-e2e"
+            "hotfix/r2.2.20-hf1-minimal-delivery"
           )
           if ($branch -notin $allowedBranches) {
             throw "WRONG_BRANCH: $branch"
