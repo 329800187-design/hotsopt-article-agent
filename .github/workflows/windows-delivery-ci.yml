@@ -291,9 +291,9 @@ jobs:
           RELEASE_TAG: r2.2.21-retest-d51413ab
         run: |
           $ErrorActionPreference = "Stop"
-          $setup = Get-ChildItem -Path . -Recurse -File -Filter "热点图文批量生产工作台_RC1.3.3-Lite-R2.2.20_Setup.exe" | Select-Object -First 1
-          $runtime = Get-ChildItem -Path . -Recurse -File -Filter "热点图文批量生产工作台_RC1.3.3-Lite-R2.2.20_Windows运行包.zip" | Select-Object -First 1
-          $customer = Get-ChildItem -Path . -Recurse -File -Filter "热点图文批量生产工作台_RC1.3.3-Lite-R2.2.20*客户交付包.zip" | Select-Object -First 1
+          $setup = Get-ChildItem -Path . -Recurse -File -Filter "*_RC1.3.3-Lite-R2.2.21_Setup.exe" | Select-Object -First 1
+          $runtime = Get-ChildItem -Path . -Recurse -File -Filter "*_RC1.3.3-Lite-R2.2.21_Windows运行包.zip" | Select-Object -First 1
+          $customer = Get-ChildItem -Path . -Recurse -File -Filter "*_RC1.3.3-Lite-R2.2.21_客户交付包.zip" | Select-Object -First 1
           foreach ($file in @($setup, $runtime, $customer)) {
             if (-not $file -or $file.Length -le 0) { throw "RELEASE_ASSET_MISSING_OR_EMPTY" }
           }
@@ -312,7 +312,7 @@ jobs:
             release = "RC1.3.3-Lite-R2.2.21"
             release_tag = $env:RELEASE_TAG
             source_commit = $env:SOURCE_SHA
-            branch = "fix/r2.2.20-image-export-e2e"
+            branch = "fix/r2.2.21-windows-retest-defects"
             artifacts = @(
               [ordered]@{ filename = $releaseNames[0]; size = $setup.Length; sha256 = (Get-FileHash -Algorithm SHA256 $setup.FullName).Hash.ToLowerInvariant() }
               [ordered]@{ filename = $releaseNames[1]; size = $runtime.Length; sha256 = (Get-FileHash -Algorithm SHA256 $runtime.FullName).Hash.ToLowerInvariant() }
