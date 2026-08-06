@@ -210,6 +210,7 @@ def _add_article_content(document: Document, article: dict[str, Any], base_dir: 
             _caption(document, str(cover.get("caption") or "封面图片"))
 
     inline_images = _image_index(article)
+    rendered_inline: set[str] = set()
     for index, section in enumerate(article.get("sections") or [], start=1):
         title = document.add_paragraph(str(section.get("heading") or f"正文 {index}"), style="Heading 1")
         _set_paragraph_font(title, TITLE_FONT, 15, bold=True)
@@ -223,6 +224,23 @@ def _add_article_content(document: Document, article: dict[str, Any], base_dir: 
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             if _add_image(paragraph, image.get("path"), base_dir, 5.8):
                 _caption(document, str(image.get("caption") or f"配图 {index}"))
+                rendered_inline.add(str(image.get("image_id") or image.get("slot_id") or image.get("paragraph_ref") or f"section-{index}"))
+
+    # Never silently drop a successful image when an older article has fewer
+    # sections than its persisted image slots. Preserve stable order and emit
+    # any unplaced images after the corresponding text content.
+    remaining = sorted(
+        (item for item in article.get("images") or [] if item.get("role") == "inline" and item.get("status") == "completed"),
+        key=lambda item: (int(item.get("order") or 0), str(item.get("image_id") or item.get("slot_id") or "")),
+    )
+    for index, image in enumerate(remaining, start=1):
+        identity = str(image.get("image_id") or image.get("slot_id") or image.get("paragraph_ref") or "")
+        if identity in rendered_inline:
+            continue
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        if _add_image(paragraph, image.get("path"), base_dir, 5.8):
+            _caption(document, str(image.get("caption") or f"配图 {index}"))
 
 
 

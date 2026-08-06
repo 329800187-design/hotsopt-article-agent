@@ -1648,6 +1648,11 @@ def _about_page(root: Path) -> None:
 def _settings_page(settings: dict[str, Any], save_settings: Any, root: Path, restricted: bool = False) -> None:
     page_header("设置", "模型设置", "文本和图片使用同一个API Key，接口地址和模型仍分别设置。")
     st.caption("API Key 只保存在本机，不会进入文章、任务或导出文件。")
+    if settings.get("first_run_configuration_required"):
+        st.info("首次启动尚未配置模型，请在本页填写文本和图片模型后再开始创作。软件不会自动写入或假装配置 OpenAI。")
+    if settings.get("configuration_recovery_required"):
+        backup_path = str(settings.get("configuration_backup_path") or "")
+        st.error(f"配置文件无法读取，已保留原文件并备份{('：' + backup_path) if backup_path else ''}。请核对后重新填写模型设置。")
     if st.session_state.pop("rc132_focus_text_test", False):
         st.warning("上一次任务失败发生在文本模型阶段。建议先执行“基础连接检测”和“测试文章生成能力”，确认接口、模型与 Endpoint 是否正常。")
     if settings.get("credential_migration_error"):
@@ -1934,12 +1939,37 @@ def _settings_page(settings: dict[str, Any], save_settings: Any, root: Path, res
 
 
 def _license_candidates(root: Path) -> list[Path]:
+    """Return deterministic, bounded license candidates without following escapes."""
+    from modules.app_paths import data_root as _data_root, license_root as _license_root
+
+    roots = (
+        root.resolve(),
+        (root / "license").resolve(),
+        (root / "licenses").resolve(),
+        _data_root().resolve(),
+        (_data_root() / "license").resolve(),
+        (_data_root() / "licenses").resolve(),
+        _license_root().resolve(),
+    )
     candidates: list[Path] = []
-    for folder in (root, root / "license", root / "licenses", root / "export"):
+    seen: set[Path] = set()
+    for folder in roots:
         if not folder.is_dir():
             continue
-        candidates.extend(sorted(folder.glob("*.license")))
-    return list(dict.fromkeys(path.resolve() for path in candidates if path.is_file()))
+        try:
+            entries = sorted(folder.glob("*.license"), key=lambda item: item.name.casefold())
+        except OSError:
+            continue
+        for candidate in entries:
+            try:
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(folder)
+            except (OSError, ValueError):
+                continue
+            if resolved.is_file() and resolved not in seen:
+                seen.add(resolved)
+                candidates.append(resolved)
+    return candidates
 
 
 def _try_auto_import_license(root: Path) -> dict[str, Any] | None:

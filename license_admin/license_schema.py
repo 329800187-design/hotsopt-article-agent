@@ -5,7 +5,7 @@ import binascii
 import json
 import math
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 SCHEMA_VERSION = 1
@@ -46,7 +46,7 @@ def _parse_time(value: object, field: str) -> datetime:
         raise LicenseValidationError("INVALID_LICENSE", f"{field} 无效") from exc
     if parsed.tzinfo is None:
         raise LicenseValidationError("INVALID_LICENSE", f"{field} 必须包含时区")
-    return parsed
+    return parsed.astimezone(timezone.utc)
 
 
 def validate_license_structure(value: object) -> dict[str, Any]:

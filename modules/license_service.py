@@ -25,6 +25,7 @@ ACTIVE_LICENSE_PATH = license_root() / "active.license"
 STATE_PATH = license_root() / "license_state.json"
 STATE_SECRET_NAME = "license_last_seen_utc"
 CLOCK_ROLLBACK_TOLERANCE = timedelta(minutes=5)
+NOT_BEFORE_CLOCK_SKEW = timedelta(minutes=5)
 RECOVERY_MIN_INTERVAL = timedelta(seconds=5)
 
 
@@ -76,10 +77,10 @@ def validate_license(value: object, expected_device: str | None = None, now: dat
         raise LicenseValidationError("DEVICE_IDENTITY_UNAVAILABLE", "device identity is unavailable") from exc
     if data["device_code"] != expected_device:
         raise LicenseValidationError("DEVICE_MISMATCH", "license does not belong to this device")
-    current = now or datetime.now(timezone.utc)
-    not_before = datetime.fromisoformat(data["not_before"])
-    expires_at = datetime.fromisoformat(data["expires_at"])
-    if current < not_before:
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    not_before = datetime.fromisoformat(data["not_before"]).astimezone(timezone.utc)
+    expires_at = datetime.fromisoformat(data["expires_at"]).astimezone(timezone.utc)
+    if current < not_before - NOT_BEFORE_CLOCK_SKEW:
         raise LicenseValidationError("NOT_YET_VALID", "license is not active yet")
     if current > expires_at:
         raise LicenseValidationError("LICENSE_EXPIRED", "license has expired")
@@ -268,8 +269,22 @@ def check_license(now: datetime | None = None) -> dict[str, Any]:
     if not ACTIVE_LICENSE_PATH.is_file():
         return {"valid": False, "code": "LICENSE_REQUIRED", "message": "当前授权不可用，已有内容仍可查看和导出。导入有效许可证后即可继续生成。"}
     try:
-        data = validate_license(_load_json(ACTIVE_LICENSE_PATH), now=now)
+        raw_data = _load_json(ACTIVE_LICENSE_PATH)
+        data = validate_license(raw_data, now=now)
     except LicenseValidationError as exc:
+        if exc.code == "NOT_YET_VALID":
+            try:
+                not_before = datetime.fromisoformat(str(raw_data["not_before"])).astimezone(timezone.utc)
+                remaining = max(0, int((not_before - now).total_seconds()))
+                return {
+                    "valid": False,
+                    "code": exc.code,
+                    "message": _friendly_error(exc.code),
+                    "not_before": not_before.isoformat(),
+                    "not_before_remaining_seconds": remaining,
+                }
+            except (UnboundLocalError, KeyError, TypeError, ValueError):
+                pass
         return {"valid": False, "code": exc.code, "message": _friendly_error(exc.code)}
     status = clock_status()
     if status["clock_status"] == "suspected":
@@ -325,7 +340,13 @@ def _persist_validated_license(validated: dict[str, Any]) -> dict[str, Any]:
 
 
 def _public_summary(data: dict[str, Any]) -> dict[str, Any]:
-    return {"license_id": data.get("license_id"), "customer_name": data.get("customer_name"), "edition": data.get("edition"), "expires_at": data.get("expires_at"), "features": list(data.get("features") or [])}
+    return {
+        "license_id": data.get("license_id"),
+        "customer_name": data.get("customer_name"),
+        "edition": data.get("edition"),
+        "expires_at": data.get("expires_at"),
+        "features": list(data.get("features") or []),
+    }
 
 
 def _friendly_error(code: str) -> str:

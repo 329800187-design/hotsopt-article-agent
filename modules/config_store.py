@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -87,12 +88,11 @@ def load_settings() -> dict[str, Any]:
     ensure_user_data_dirs()
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not SETTINGS_PATH.exists():
-        try:
-            save_settings(DEFAULT_SETTINGS)
-        except Exception as exc:
-            _log_credential_failure(exc, "initial settings persistence")
-            return _settings_with_runtime_secrets(dict(DEFAULT_SETTINGS), migration_error=True)
-        return _settings_with_runtime_secrets(dict(DEFAULT_SETTINGS))
+        # Do not materialize provider defaults into the user's data directory.
+        # The settings screen is the first-run configuration guide.
+        result = _settings_with_runtime_secrets(dict(DEFAULT_SETTINGS))
+        result["first_run_configuration_required"] = True
+        return result
     try:
         with SETTINGS_PATH.open("r", encoding="utf-8") as handle:
             raw_settings = json.load(handle)
@@ -112,8 +112,18 @@ def load_settings() -> dict[str, Any]:
             with SETTINGS_PATH.open("r", encoding="utf-8") as handle:
                 settings = _merge(DEFAULT_SETTINGS, json.load(handle))
         return _settings_with_runtime_secrets(settings)
-    except (OSError, json.JSONDecodeError):
-        return _settings_with_runtime_secrets(dict(DEFAULT_SETTINGS))
+    except (OSError, json.JSONDecodeError) as exc:
+        # Preserve the user's file for diagnosis and never silently reset model
+        # URLs, model names, provider, or credential references.
+        try:
+            backup = SETTINGS_PATH.with_name(f"settings.json.corrupt-{datetime.now(timezone.utc):%Y%m%d%H%M%S}")
+            SETTINGS_PATH.replace(backup)
+        except OSError:
+            backup = None
+        result = _settings_with_runtime_secrets(dict(DEFAULT_SETTINGS), migration_error=True)
+        result["configuration_recovery_required"] = True
+        result["configuration_backup_path"] = str(backup or "")
+        return result
 
 
 def _migrate_legacy_credentials(settings: dict[str, Any], raw_settings: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -274,4 +284,3 @@ def _settings_with_runtime_secrets(settings: dict[str, Any], migration_error: bo
     result["credential_migration_error"] = bool(migration_error)
     result["credential_available"] = credential_available
     return result
-

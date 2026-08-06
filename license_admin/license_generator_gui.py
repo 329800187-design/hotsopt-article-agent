@@ -40,7 +40,7 @@ def main() -> None:
         fields[key] = entry
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
-    fields["not_before"].insert(0, now.isoformat())
+    fields["not_before"].insert(0, (now - timedelta(minutes=5)).isoformat())
     fields["expires_at"].insert(0, (now + timedelta(days=365)).isoformat())
 
     status = tk.Label(root, textvariable=status_var, fg="#B00020", justify="left", wraplength=460)
