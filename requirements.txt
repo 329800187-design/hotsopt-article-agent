@@ -1,0 +1,10 @@
+streamlit>=1.35,<2
+httpx>=0.27,<1
+Pillow>=10,<12
+python-docx>=1.1,<2
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+socksio>=1,<2
+cryptography>=42,<47
+python-multipart>=0.0.20,<1
+pywebview>=5.4,<7

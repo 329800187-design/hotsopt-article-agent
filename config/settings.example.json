@@ -1,0 +1,55 @@
+{
+  "app_mode": "production",
+  "demo_mode": false,
+  "hot_source_url": "https://api-hot.imsyy.top/toutiao",
+  "hot_cache_ttl_seconds": 21600,
+  "network": {
+    "mode": "system",
+    "http_proxy": "",
+    "https_proxy": "",
+    "timeout_seconds": 15,
+    "verify_ssl": true
+  },
+  "text_profile": {
+    "name": "OpenAI-compatible text",
+    "base_url": "https://api.openai.com/v1",
+    "endpoint": "/chat/completions",
+    "api_key": "",
+    "model": "gpt-4o-mini",
+    "auth_type": "bearer",
+    "auth_header": "",
+    "headers": {},
+    "timeout_seconds": 120,
+    "response_format": "json_object",
+    "enabled": true
+  },
+  "image_profile": {
+    "name": "OpenAI-compatible image",
+    "base_url": "https://api.openai.com/v1",
+    "endpoint": "/images/generations",
+    "api_key": "",
+    "model": "gpt-image-1",
+    "auth_type": "bearer",
+    "auth_header": "",
+    "headers": {},
+    "size": "1536x1024",
+    "api_format": "openai_compatible",
+    "timeout_seconds": 180,
+    "response_type": "auto",
+    "enabled": true
+  },
+  "dashscope_native_example": {
+    "name": "Alibaba DashScope Native Qwen Image",
+    "base_url": "https://your-dashscope-host",
+    "endpoint": "/api/v1/services/aigc/multimodal-generation/generation",
+    "api_key": "",
+    "model": "qwen-image-2.0-pro",
+    "auth_type": "bearer",
+    "headers": {},
+    "size": "1024*1024",
+    "api_format": "dashscope_native",
+    "timeout_seconds": 180,
+    "response_type": "auto",
+    "enabled": true
+  }
+}
