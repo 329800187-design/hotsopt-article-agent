@@ -64,6 +64,7 @@ def plan_inline_image_assets(
         )
         plans.append({
             "image_id": f"section-{index}",
+            "slot_id": f"section-{index}",
             "role": "inline",
             "order": index,
             "paragraph_ref": f"section-{index}",

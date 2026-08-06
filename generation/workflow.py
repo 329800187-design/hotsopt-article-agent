@@ -165,7 +165,15 @@ def prepare_fusion(state: dict[str, Any]) -> dict[str, Any]:
     require_workflow(state, ("fusion_pending", "final_draft_pending_preview", "final_draft_confirmed", "export_ready"), "FUSION_CONFIRMATION_REQUIRED")
     sync_article_images(state)
     final_document = deepcopy(state.get("article") or {})
-    final_document["images"] = [deepcopy(item) for item in completed_image_items(state)]
+    available = completed_image_items(state)
+    confirmed_ids = set(str(item) for item in ((state.get("image_confirmation") or {}).get("image_ids") or []) if str(item).strip())
+    final_images = [item for item in available if not confirmed_ids or str(item.get("image_id") or item.get("slot_id") or "") in confirmed_ids]
+    final_document["images"] = [deepcopy(item) for item in final_images]
+    final_document["image_counts"] = {
+        "successful_generation_count": len(available),
+        "confirmed_image_count": len(final_images),
+        "final_document_image_count": len(final_images),
+    }
     final_document["document_kind"] = "final_document"
     final_document["generated_at"] = _now()
     state["final_document"] = final_document

@@ -1304,6 +1304,35 @@ def _content(restricted: bool = False) -> None:
                 st.subheader(str(batch.get("batch_name") or "未命名创作"))
                 st.caption(f"{_status(batch.get('status'))} · {completed}/{total} 篇完成 · 创建于 {batch.get('created_at', '')}")
                 st.progress(min(1.0, completed / total) if total else 0.0)
+                st.markdown("#### 快捷批量模式")
+                st.caption("默认每篇 2 张图片；单篇失败不会阻断其他文章。需要逐篇调整时再点击‘查看详情’。")
+                selected_ids: list[str] = []
+                for fast_item in (batch.get("items") or []):
+                    fast_task = fast_item.get("task") or {}
+                    fast_task_id = str(fast_task.get("task_id") or "")
+                    if not fast_task_id:
+                        continue
+                    fast_topic = (fast_item.get("topic_snapshot") or {}).get("title") or fast_task.get("task_name") or "未命名文章"
+                    if st.checkbox(str(fast_topic), value=True, key=f"rc1_fast_select_{batch.get('batch_id')}_{fast_task_id}"):
+                        selected_ids.append(fast_task_id)
+                fast_count = st.selectbox("统一图片数量", [1, 2, 3, 4, 5], index=1, key=f"rc1_fast_count_{batch.get('batch_id')}")
+                st.caption(f"已选 {len(selected_ids)} 篇 · 预计图片调用 {len(selected_ids) * int(fast_count)} 次")
+                if not restricted and selected_ids and st.button("确认所选文章并生成图片", type="primary", key=f"rc1_fast_generate_{batch.get('batch_id')}"):
+                    failures: list[str] = []
+                    for fast_task_id in selected_ids:
+                        try:
+                            _api("POST", f"/tasks/{fast_task_id}/article/confirm")
+                            _api("POST", f"/tasks/{fast_task_id}/images/generate", timeout=30, json={"confirm_paid": True, "include_cover": True, "inline_count": int(fast_count) - 1})
+                        except Exception as exc:
+                            failures.append(f"{fast_task_id}: {str(exc)[:120]}")
+                    if failures:
+                        st.warning("部分文章提交失败：" + "；".join(failures))
+                    else:
+                        st.success("已批量确认文章并提交图片生成。")
+                    st.rerun()
+                if not restricted:
+                    _download(f"/batches/{batch.get('batch_id')}/export/word", f"{batch.get('batch_name') or '本次创作'}.docx", "生成图文稿并导出 Word", f"rc1_fast_word_{batch.get('batch_id')}")
+                    _download(f"/batches/{batch.get('batch_id')}/export/zip", f"{batch.get('batch_name') or '本次创作'}.zip", "生成图文稿并导出 ZIP", f"rc1_fast_zip_{batch.get('batch_id')}")
                 for item in (batch.get("items") or []):
                     task = item.get("task") or {}
                     task_id = str(task.get("task_id") or "")

@@ -1,6 +1,6 @@
-# RC1.3.3-Lite-R2.2.20 状态
+# RC1.3.3-Lite-R2.2.20-HF1 状态
 
-当前版本：RC1.3.3-Lite-R2.2.20
+当前版本：RC1.3.3-Lite-R2.2.20-HF1
 
 历史基线锚点：L1-RC1.2.3 的生成核心、提供商和热点源约束继续保留。
 
@@ -23,11 +23,13 @@
 
 当前测试结果以本轮实际运行记录为准，并写入最终验收报告、Codex 自行复检报告和 upload_manifest.json。
 
-`RC1.3.3-Lite-R2.2.20 源码修复和 Windows 构建门禁已通过；GitHub 制品额度已满导致安装包未能上传，等待 Windows 制品额度重算、重跑和用户复测`
+`RC1.3.3-Lite-R2.2.20-HF1 三图导出与快捷批量流程源码修复完成，等待 Windows 构建和用户复测`
 
 R2.2.19 用户复测：`FAIL`。
 
-READY_FOR_PACKAGE_BUILD=true
+BUILD_ALLOWED=true
+
+READY_FOR_PACKAGE_BUILD=false
 
 READY_FOR_USER_RETEST=false
 
