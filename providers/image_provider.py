@@ -185,6 +185,11 @@ class OpenAIImageProvider:
         self.last_http_status: int | None = None
         self.last_response_type = ""
         self.generation_calls = 0
+        self.last_request_url = ""
+        self.last_payload_keys: list[str] = []
+        self.last_provider_error_code = ""
+        self.last_provider_error_message = ""
+        self.last_request_id = ""
 
     def _native_dashscope(self) -> bool:
         return (
@@ -222,6 +227,9 @@ class OpenAIImageProvider:
         base_url = str(self.profile.get("base_url") or "").rstrip("/")
         endpoint = str(self.profile.get("endpoint") or "/images/generations")
         url = normalize_endpoint_url(base_url, endpoint)
+        payload = build_image_request_payload(self.profile, request.prompt)
+        self.last_request_url = url
+        self.last_payload_keys = sorted(payload.keys())
         headers = _headers(self.profile)
         if self._native_dashscope() and str(self.profile.get("sync_or_async") or "sync").lower() == "async":
             headers["X-DashScope-Async"] = "enable"
@@ -230,12 +238,24 @@ class OpenAIImageProvider:
             self.generation_calls += 1
             timeout = float(self.profile.get("timeout_seconds") or self.network_settings.get("timeout_seconds") or 180)
             with create_http_client({**self.network_settings, "timeout_seconds": timeout}) as client:
-                response = client.post(url, headers=headers, json=build_image_request_payload(self.profile, request.prompt))
+                response = client.post(url, headers=headers, json=payload)
             self.last_http_status = response.status_code
+            response_headers = getattr(response, "headers", {}) or {}
+            self.last_request_id = str(response_headers.get("x-request-id") or response_headers.get("request-id") or "")[:200]
+            try:
+                body = response.json()
+                error = body.get("error") if isinstance(body, dict) else None
+                if isinstance(error, dict):
+                    self.last_provider_error_code = str(error.get("code") or error.get("type") or "")[:100]
+                    self.last_provider_error_message = redact_sensitive_text(str(error.get("message") or ""))[:500]
+                elif isinstance(body, dict):
+                    self.last_provider_error_message = redact_sensitive_text(str(body.get("message") or body.get("error_message") or ""))[:500]
+            except Exception:
+                self.last_provider_error_message = redact_sensitive_text(getattr(response, "text", "") or "")[:500]
             if response.status_code == 401:
                 raise ProviderError("AUTHENTICATION_FAILED", "image model authentication failed")
             if response.status_code == 404:
-                content_type = str(response.headers.get("content-type") or "").lower()
+                content_type = str(response_headers.get("content-type") or "").lower()
                 if "text/html" in content_type or "text/plain" in content_type:
                     raise ProviderError("IMAGE_GENERATION_NOT_SUPPORTED", "image generation endpoint is unavailable")
                 raise ProviderError("MODEL_NOT_FOUND", "image model endpoint or model was not found")
@@ -343,12 +363,25 @@ class OpenAIImageProvider:
         try:
             path = self.generate_image(ImageGenerationRequest("一只白色咖啡杯放在木桌上，纯净背景，不含文字。", output_path))
             metadata = inspect_image(path)
-            return ModelTestResult(True, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, details={**metadata, "generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
+            return ModelTestResult(True, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, details={**metadata, **self._diagnostic_details(), "generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
         except Exception as exc:
             mapped = map_provider_exception(exc)
             code = str(getattr(mapped, "code", "PROVIDER_INTERNAL_ERROR"))
             detail = str(getattr(mapped, "detail", mapped))
-            return ModelTestResult(False, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, error_code=code, error_message=user_facing_error_message(code, redact_sensitive_text(detail)), retryable=is_retryable_error(code), details={"generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
+            return ModelTestResult(False, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, error_code=code, error_message=user_facing_error_message(code, redact_sensitive_text(detail)), retryable=is_retryable_error(code), details={**self._diagnostic_details(), "generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
+
+    def _diagnostic_details(self) -> dict[str, Any]:
+        parsed = urlparse(self.last_request_url)
+        safe_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", "")) if parsed.netloc else ""
+        return {
+            "IMAGE_REQUEST_URL": safe_url,
+            "IMAGE_REQUEST_MODEL": str(self.profile.get("model") or ""),
+            "IMAGE_REQUEST_PAYLOAD_KEYS": self.last_payload_keys,
+            "HTTP_STATUS": self.last_http_status,
+            "PROVIDER_ERROR_CODE": self.last_provider_error_code,
+            "PROVIDER_ERROR_MESSAGE": self.last_provider_error_message,
+            "REQUEST_ID": self.last_request_id,
+        }
 
     def generate(
         self,

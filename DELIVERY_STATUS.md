@@ -2,7 +2,7 @@
 
 Branch: `fix/r2.2.20-image-export-e2e`
 
-Version: `RC1.3.3-Lite-R2.2.20`
+Version: `RC1.3.3-Lite-R2.2.20-HF1`
 
 Baseline: `362c6ab23fc0f0b48cf63b5855201a21cf2d7850`
 
@@ -30,7 +30,7 @@ R2.2.19 user retest: `FAIL`.
 
 BUILD_ALLOWED=true
 
-READY_FOR_PACKAGE_BUILD=true
+READY_FOR_PACKAGE_BUILD=false
 
 READY_FOR_USER_RETEST=false
 

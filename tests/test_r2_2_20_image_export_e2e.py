@@ -108,6 +108,27 @@ def test_word_contains_body_two_images_and_relationships(tmp_path):
     assert relations.count("relationships/image") == 2
 
 
+def test_three_successful_images_are_all_persisted_and_embedded_when_sections_are_short(tmp_path):
+    state = _completed_state(tmp_path, "r220-three")
+    Image.new("RGB", (80, 60), (20, 140, 60)).save(tmp_path / "images" / "section-2.png")
+    state["inline_images"].append({"role": "inline", "image_id": "section-2", "slot_id": "section-2", "paragraph_ref": "section-2", "path": "images/section-2.png", "status": "completed", "order": 2})
+    state["article"]["sections"] = state["article"]["sections"][:1]
+    initialize_workflow(state)
+    confirm_article(state); begin_image_generation(state); finish_image_generation(state)
+    confirm_images(state, ["cover", "section-1", "section-2"]); prepare_fusion(state); confirm_final_draft(state)
+    assert len(state["final_document"]["images"]) == 3
+    output = export_article(state["final_document"], tmp_path / "three.docx", tmp_path)
+    with zipfile.ZipFile(output) as archive:
+        assert len([name for name in archive.namelist() if name.startswith("word/media/")]) == 3
+        assert archive.read("word/_rels/document.xml.rels").decode("utf-8").count("relationships/image") == 3
+
+
+def test_fast_batch_controls_are_available_without_removing_single_article_mode():
+    source = Path("ui/rc1_app.py").read_text(encoding="utf-8")
+    for marker in ("快捷批量模式", "确认所选文章并生成图片", "统一图片数量", "生成图文稿并导出 Word", "查看详情"):
+        assert marker in source
+
+
 def test_zip_contains_complete_word_and_images(tmp_path):
     state = _completed_state(tmp_path)
     confirm_article(state); begin_image_generation(state); finish_image_generation(state)
