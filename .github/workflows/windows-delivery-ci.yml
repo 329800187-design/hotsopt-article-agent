@@ -17,6 +17,7 @@ on:
     branches:
       - fix/r1.3-customer-delivery-final
       - fix/r2.2.20-image-export-e2e
+      - fix/r2.2.21-windows-retest-defects
 
 permissions:
   contents: write
