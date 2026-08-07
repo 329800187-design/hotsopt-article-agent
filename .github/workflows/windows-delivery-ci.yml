@@ -50,6 +50,7 @@ jobs:
             "fix/r1.3-customer-delivery-final",
             "fix/r2.2.20-image-export-e2e"
             "hotfix/r2.2.20-hf1-minimal-delivery"
+            "hotfix/r2.2.20-hf2-image-call-fix"
           )
           if ($branch -notin $allowedBranches) {
             throw "WRONG_BRANCH: $branch"
