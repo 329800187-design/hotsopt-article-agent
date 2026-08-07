@@ -150,12 +150,17 @@ def build_image_request_payload(profile: dict[str, Any], prompt: str) -> dict[st
             },
         }
     if adapter == "openai_images_generations":
-        return {
+        payload = {
             "model": profile.get("model"),
             "prompt": prompt,
-            "size": normalize_image_size(profile.get("size"), "openai_compatible"),
-            "n": 1,
         }
+        # Keep custom proxies on the smallest OpenAI-compatible body. Optional
+        # fields are sent only when explicitly enabled by the profile.
+        if profile.get("send_size"):
+            payload["size"] = normalize_image_size(profile.get("size"), "openai_compatible")
+        if profile.get("send_n"):
+            payload["n"] = int(profile.get("n") or 1)
+        return payload
     raise ProviderError("INVALID_REQUEST", f"unsupported image request adapter: {adapter}")
 
 
@@ -190,6 +195,11 @@ class OpenAIImageProvider:
         self.last_provider_error_code = ""
         self.last_provider_error_message = ""
         self.last_request_id = ""
+        self.last_raw_error_body = ""
+        self.last_prompt_length = 0
+        self.last_prompt_preview = ""
+        self.last_images_returned = 0
+        self.last_response_time_ms: int | None = None
 
     def _native_dashscope(self) -> bool:
         return (
@@ -228,8 +238,12 @@ class OpenAIImageProvider:
         endpoint = str(self.profile.get("endpoint") or "/images/generations")
         url = normalize_endpoint_url(base_url, endpoint)
         payload = build_image_request_payload(self.profile, request.prompt)
+        if not str(request.prompt or "").strip():
+            raise ProviderError("IMAGE_PROMPT_EMPTY", "图片提示词为空")
         self.last_request_url = url
         self.last_payload_keys = sorted(payload.keys())
+        self.last_prompt_length = len(str(request.prompt or ""))
+        self.last_prompt_preview = redact_sensitive_text(str(request.prompt or "")[:120])
         headers = _headers(self.profile)
         if self._native_dashscope() and str(self.profile.get("sync_or_async") or "sync").lower() == "async":
             headers["X-DashScope-Async"] = "enable"
@@ -252,6 +266,7 @@ class OpenAIImageProvider:
                     self.last_provider_error_message = redact_sensitive_text(str(body.get("message") or body.get("error_message") or ""))[:500]
             except Exception:
                 self.last_provider_error_message = redact_sensitive_text(getattr(response, "text", "") or "")[:500]
+            self.last_raw_error_body = self.last_provider_error_message
             if response.status_code == 401:
                 raise ProviderError("AUTHENTICATION_FAILED", "image model authentication failed")
             if response.status_code == 404:
@@ -265,6 +280,7 @@ class OpenAIImageProvider:
             response.raise_for_status()
             data = response.json()
             if _image_item_from_response(data, native_dashscope=self._native_dashscope()):
+                self.last_images_returned = 1
                 return {"status": "succeeded", "result": data, "output_path": request.output_path}
             task_id = _nested_string(data, ("task_id", "request_id", "job_id", "id"))
             if not task_id:
@@ -362,10 +378,12 @@ class OpenAIImageProvider:
         started = time.perf_counter()
         try:
             path = self.generate_image(ImageGenerationRequest("一只白色咖啡杯放在木桌上，纯净背景，不含文字。", output_path))
+            self.last_response_time_ms = int((time.perf_counter() - started) * 1000)
             metadata = inspect_image(path)
             return ModelTestResult(True, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, details={**metadata, **self._diagnostic_details(), "generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
         except Exception as exc:
             mapped = map_provider_exception(exc)
+            self.last_response_time_ms = int((time.perf_counter() - started) * 1000)
             code = str(getattr(mapped, "code", "PROVIDER_INTERNAL_ERROR"))
             detail = str(getattr(mapped, "detail", mapped))
             return ModelTestResult(False, "openai-compatible-image", str(self.profile.get("model") or ""), self.last_http_status, int((time.perf_counter() - started) * 1000), image_response_type=self.last_response_type, error_code=code, error_message=user_facing_error_message(code, redact_sensitive_text(detail)), retryable=is_retryable_error(code), details={**self._diagnostic_details(), "generation_calls": self.generation_calls, "paid_test": True, "charged": self.generation_calls > 0})
@@ -375,12 +393,23 @@ class OpenAIImageProvider:
         safe_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", "")) if parsed.netloc else ""
         return {
             "IMAGE_REQUEST_URL": safe_url,
+            "IMAGE_BASE_URL": f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else "",
+            "IMAGE_ENDPOINT_PATH": parsed.path if parsed.netloc else "",
             "IMAGE_REQUEST_MODEL": str(self.profile.get("model") or ""),
+            "IMAGE_PROVIDER_KIND": str(self.profile.get("provider_id") or self.profile.get("api_format") or "openai_compatible"),
             "IMAGE_REQUEST_PAYLOAD_KEYS": self.last_payload_keys,
+            "PAYLOAD_KEYS": self.last_payload_keys,
+            "PROMPT_LENGTH": self.last_prompt_length,
+            "PROMPT_PREVIEW": self.last_prompt_preview,
             "HTTP_STATUS": self.last_http_status,
             "PROVIDER_ERROR_CODE": self.last_provider_error_code,
             "PROVIDER_ERROR_MESSAGE": self.last_provider_error_message,
+            "RAW_ERROR_BODY": self.last_raw_error_body,
             "REQUEST_ID": self.last_request_id,
+            "RESPONSE_TIME_MS": self.last_response_time_ms,
+            "IMAGE_COUNT_REQUESTED": 1,
+            "IMAGE_COUNT_RETURNED": self.last_images_returned,
+            "BILLED": self.generation_calls > 0 and self.last_http_status in {200, 201, 202},
         }
 
     def generate(
