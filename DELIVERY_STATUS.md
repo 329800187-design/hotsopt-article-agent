@@ -2,7 +2,7 @@
 
 Branch: `fix/r2.2.20-image-export-e2e`
 
-Version: `RC1.3.3-Lite-R2.2.20-HF1`
+Version: `RC1.3.3-Lite-R2.2.20-HF2`
 
 Baseline: `362c6ab23fc0f0b48cf63b5855201a21cf2d7850`
 
