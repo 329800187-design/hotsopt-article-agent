@@ -1528,6 +1528,8 @@ def _content(restricted: bool = False) -> None:
                         completed_inline = sum(item.get("status") == "completed" for item in inline_items)
                         failed_inline = sum(item.get("status") == "failed" for item in inline_items)
                         st.caption(f"已完成 {completed_inline}/{len(inline_items)} 张 · 失败 {failed_inline} 张")
+                        if any(item.get("status") == "generating" for item in inline_items):
+                            st.info(f"正在生成图片 {min(completed_inline + 1, len(inline_items))}/{len(inline_items)}，同一图片渠道按顺序处理。")
                         if failed_inline and not restricted and st.button("重试失败图片", disabled=not inline_paid_confirmed, key=f"rc1_inline_retry_failed_{task_id}"):
                             _api("POST", f"/tasks/{task_id}/inline-images/retry-failed", json={"confirm_paid": True})
                             st.rerun()

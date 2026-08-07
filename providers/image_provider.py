@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
+import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
@@ -21,6 +23,10 @@ from providers.text_provider import ProviderError, _headers
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 DATA_URI_RE = re.compile(r"^data:(?P<mime>image/(?:png|jpeg|jpg|webp));base64,(?P<data>[A-Za-z0-9+/=\r\n]+)$", re.I)
 TERMINAL_IMAGE_TASK_STATUSES = {"succeeded", "failed", "cancelled", "timeout"}
+IMAGE_GENERATION_CONCURRENCY = 1
+_CHANNEL_LOCKS: dict[str, threading.Lock] = {}
+_CHANNEL_WAITERS: dict[str, int] = {}
+_CHANNEL_LOCKS_GUARD = threading.Lock()
 IMAGE_TASK_STATUS_ALIASES = {
     "pending": "pending",
     "queued": "pending",
@@ -164,6 +170,34 @@ def build_image_request_payload(profile: dict[str, Any], prompt: str) -> dict[st
     raise ProviderError("INVALID_REQUEST", f"unsupported image request adapter: {adapter}")
 
 
+def _image_channel_key(profile: dict[str, Any]) -> str:
+    base_url = str(profile.get("base_url") or "").strip().lower().rstrip("/")
+    model = str(profile.get("model") or "").strip()
+    credential_ref = str(profile.get("credential_ref") or "").strip()
+    if not credential_ref:
+        # Keep the lock channel stable without ever storing the API key itself.
+        credential_ref = hashlib.sha256(str(profile.get("api_key") or "").encode("utf-8")).hexdigest()[:16]
+    return f"{base_url}|{model}|{credential_ref}"
+
+
+def _channel_lock_for(profile: dict[str, Any]) -> tuple[str, threading.Lock, int]:
+    key = _image_channel_key(profile)
+    with _CHANNEL_LOCKS_GUARD:
+        lock = _CHANNEL_LOCKS.setdefault(key, threading.Lock())
+        _CHANNEL_WAITERS[key] = int(_CHANNEL_WAITERS.get(key) or 0) + 1
+        queue_position = _CHANNEL_WAITERS[key]
+    return key, lock, queue_position
+
+
+def _release_channel_waiter(key: str) -> None:
+    with _CHANNEL_LOCKS_GUARD:
+        remaining = int(_CHANNEL_WAITERS.get(key) or 1) - 1
+        if remaining > 0:
+            _CHANNEL_WAITERS[key] = remaining
+        else:
+            _CHANNEL_WAITERS.pop(key, None)
+
+
 def inspect_image(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ProviderError("INVALID_RESPONSE", "image file was not created")
@@ -200,6 +234,11 @@ class OpenAIImageProvider:
         self.last_prompt_preview = ""
         self.last_images_returned = 0
         self.last_response_time_ms: int | None = None
+        self.last_retry_after: float | None = None
+        self.last_attempt = 0
+        self.last_queue_position = 0
+        self.last_request_started_at = ""
+        self.last_request_finished_at = ""
 
     def _native_dashscope(self) -> bool:
         return (
@@ -244,16 +283,25 @@ class OpenAIImageProvider:
         self.last_payload_keys = sorted(payload.keys())
         self.last_prompt_length = len(str(request.prompt or ""))
         self.last_prompt_preview = redact_sensitive_text(str(request.prompt or "")[:120])
+        self.last_retry_after = None
+        self.last_provider_error_code = ""
+        self.last_provider_error_message = ""
+        self.last_raw_error_body = ""
         headers = _headers(self.profile)
         if self._native_dashscope() and str(self.profile.get("sync_or_async") or "sync").lower() == "async":
             headers["X-DashScope-Async"] = "enable"
         response: httpx.Response | None = None
+        self.last_attempt = max(1, int(self.last_attempt or 0))
+        self.last_request_started_at = datetime.now(timezone.utc).isoformat()
+        started = time.perf_counter()
         try:
             self.generation_calls += 1
             timeout = float(self.profile.get("timeout_seconds") or self.network_settings.get("timeout_seconds") or 180)
             with create_http_client({**self.network_settings, "timeout_seconds": timeout}) as client:
                 response = client.post(url, headers=headers, json=payload)
             self.last_http_status = response.status_code
+            self.last_response_time_ms = int((time.perf_counter() - started) * 1000)
+            self.last_request_finished_at = datetime.now(timezone.utc).isoformat()
             response_headers = getattr(response, "headers", {}) or {}
             self.last_request_id = str(response_headers.get("x-request-id") or response_headers.get("request-id") or "")[:200]
             try:
@@ -266,7 +314,7 @@ class OpenAIImageProvider:
                     self.last_provider_error_message = redact_sensitive_text(str(body.get("message") or body.get("error_message") or ""))[:500]
             except Exception:
                 self.last_provider_error_message = redact_sensitive_text(getattr(response, "text", "") or "")[:500]
-            self.last_raw_error_body = self.last_provider_error_message
+            self.last_raw_error_body = redact_sensitive_text(getattr(response, "text", "") or "")[:1000] or self.last_provider_error_message
             if response.status_code == 401:
                 raise ProviderError("AUTHENTICATION_FAILED", "image model authentication failed")
             if response.status_code == 404:
@@ -276,7 +324,8 @@ class OpenAIImageProvider:
                 raise ProviderError("MODEL_NOT_FOUND", "image model endpoint or model was not found")
             if response.status_code == 429:
                 from providers.errors import parse_retry_after
-                raise ProviderError("RATE_LIMITED", "image model rate limited", parse_retry_after(response.headers.get("Retry-After")))
+                self.last_retry_after = parse_retry_after(response.headers.get("Retry-After"))
+                raise ProviderError("RATE_LIMITED", "image model rate limited", self.last_retry_after)
             response.raise_for_status()
             data = response.json()
             if _image_item_from_response(data, native_dashscope=self._native_dashscope()):
@@ -294,13 +343,35 @@ class OpenAIImageProvider:
                 "output_path": request.output_path,
             }
         except httpx.TimeoutException as exc:
+            self.last_request_finished_at = datetime.now(timezone.utc).isoformat()
+            self.last_response_time_ms = int((time.perf_counter() - started) * 1000)
             raise ProviderError("TIMEOUT", "image model response timed out") from exc
         except httpx.HTTPError as exc:
+            self.last_request_finished_at = datetime.now(timezone.utc).isoformat()
+            self.last_response_time_ms = int((time.perf_counter() - started) * 1000)
             raise map_provider_exception(exc, response) from exc
         except ProviderError:
             raise
         except Exception as exc:
+            self.last_request_finished_at = datetime.now(timezone.utc).isoformat()
+            self.last_response_time_ms = int((time.perf_counter() - started) * 1000)
             raise map_provider_exception(exc, response) from exc
+
+    def _submit_with_rate_limit_retry(self, request: ImageGenerationRequest) -> dict[str, Any]:
+        """Retry only real HTTP 429 responses, while holding the channel lock."""
+        for attempt in range(1, 4):
+            self.last_attempt = attempt
+            try:
+                return self.submit_image_task(request)
+            except ProviderError as exc:
+                if exc.code != "RATE_LIMITED" or attempt >= 3:
+                    raise
+                retry_after = self.last_retry_after
+                if retry_after is None:
+                    retry_after = getattr(exc, "retry_after_seconds", None)
+                delay = float(retry_after) if retry_after is not None else (5.0 if attempt == 1 else 10.0)
+                time.sleep(max(0.0, delay))
+        raise ProviderError("RATE_LIMITED", "image model rate limited")
 
     def poll_image_task(
         self,
@@ -407,6 +478,11 @@ class OpenAIImageProvider:
             "RAW_ERROR_BODY": self.last_raw_error_body,
             "REQUEST_ID": self.last_request_id,
             "RESPONSE_TIME_MS": self.last_response_time_ms,
+            "RETRY_AFTER": self.last_retry_after,
+            "ATTEMPT": self.last_attempt,
+            "QUEUE_POSITION": self.last_queue_position,
+            "REQUEST_STARTED_AT": self.last_request_started_at,
+            "REQUEST_FINISHED_AT": self.last_request_finished_at,
             "IMAGE_COUNT_REQUESTED": 1,
             "IMAGE_COUNT_RETURNED": self.last_images_returned,
             "BILLED": self.generation_calls > 0 and self.last_http_status in {200, 201, 202},
@@ -419,11 +495,27 @@ class OpenAIImageProvider:
         cancel_check: Callable[[], bool] | None = None,
     ) -> Path:
         request = ImageGenerationRequest(prompt, output_path)
-        task = self.submit_image_task(request)
-        task = self.poll_image_task(task, cancel_check=cancel_check)
-        return self.extract_image_result(task, output_path)
+        key, lock, queue_position = _channel_lock_for(self.profile)
+        self.last_queue_position = queue_position
+        try:
+            lock.acquire()
+            task = self._submit_with_rate_limit_retry(request)
+            task = self.poll_image_task(task, cancel_check=cancel_check)
+            return self.extract_image_result(task, output_path)
+        finally:
+            if lock.locked():
+                lock.release()
+            _release_channel_waiter(key)
 
     def generate_image(self, request: ImageGenerationRequest) -> Path:
-        task = self.submit_image_task(request)
-        task = self.poll_image_task(task)
-        return self.extract_image_result(task, request.output_path)
+        key, lock, queue_position = _channel_lock_for(self.profile)
+        self.last_queue_position = queue_position
+        try:
+            lock.acquire()
+            task = self._submit_with_rate_limit_retry(request)
+            task = self.poll_image_task(task)
+            return self.extract_image_result(task, request.output_path)
+        finally:
+            if lock.locked():
+                lock.release()
+            _release_channel_waiter(key)
