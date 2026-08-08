@@ -4,7 +4,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <AssemblyName>热点图文工作台</AssemblyName>
+    <AssemblyName>热点图文批量生产工作台</AssemblyName>
     <RootNamespace>HotspotArticleAgent</RootNamespace>
     <ApplicationIcon>..\ui\assets\brand.ico</ApplicationIcon>
     <Nullable>enable</Nullable>

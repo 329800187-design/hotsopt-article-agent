@@ -39,7 +39,9 @@ def test_OLD_VERSION_RUNNING_DETECTED_PASS():
     source = _source("desktop_host.py")
     assert "APP_VERSION" in source
     assert "_recover_previous_runtime_for_upgrade" in source
-    assert "检测到旧版本正在运行，正在关闭后完成升级。" in source
+    assert "previous_runtime_detected=auto_recover" in source
+    recovery_block = source.split("def _recover_previous_runtime_for_upgrade", 1)[1].split("def run", 1)[0]
+    assert "_show_message" not in recovery_block
 
 
 def test_OLD_VERSION_PROCESS_STOP_PASS():
@@ -135,3 +137,20 @@ def test_BUILD_OUTPUT_NAMES_R2_2_PASS():
     assert "Source.zip" in source
     assert "_用户主流程GUI证据包.zip" in source
     assert "等待 Windows" in _source("STATUS.md")
+
+
+def test_DESKTOP_APPHOST_ASSEMBLY_MATCHES_FORMAL_EXE_PASS():
+    project = _source("packaging/launcher_shell.csproj")
+    build = _source("scripts/build_rc1_3_3_lite_r2_2_7.py")
+    assert "<AssemblyName>热点图文批量生产工作台</AssemblyName>" in project
+    assert 'APP_EXE = "\\u70ed\\u70b9\\u56fe\\u6587\\u6279\\u91cf\\u751f\\u4ea7\\u5de5\\u4f5c\\u53f0.exe"' in build
+
+
+def test_LICENSE_PUBLIC_KEY_IS_PACKAGED_PASS():
+    key_path = ROOT / "resources" / "license_public_key.pem"
+    assert key_path.is_file()
+    assert "BEGIN PUBLIC KEY" in key_path.read_text(encoding="utf-8")
+    package = _source("scripts/package_phase1.py")
+    builder = _source("scripts/package_rc1.py")
+    assert '"resources"' in package
+    assert '"resources/"' in builder

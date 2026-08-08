@@ -640,7 +640,7 @@ class DesktopHost:
     def _recover_previous_runtime_for_upgrade(self) -> bool:
         if not self._has_previous_runtime():
             return False
-        _show_message("检测到旧版本正在运行，正在关闭后完成升级。", error=False)
+        self._write_startup_log("previous_runtime_detected=auto_recover")
         return self._recover_stale_runtime()
 
     def run(self) -> int:
