@@ -972,7 +972,7 @@ def render_start(service: Any) -> None:
 
     # ── 提交锁：点击后立即disabled，防止重复提交 ──
     submitting_key = "rc1_generation_submitting"
-    already_submitting = st.session_state.get(submitting_key)
+    already_submitting = bool(st.session_state.get(submitting_key, False))
     if st.button("🚀 开始生成" if not already_submitting else "⏳ 正在创建任务/正在进入队列…",
                  type="primary", use_container_width=True,
                  disabled=already_submitting,
@@ -1017,7 +1017,7 @@ def render_start(service: Any) -> None:
         except Exception as exc:
             st.session_state[submitting_key] = False
             _log_error("TASK-CREATE-001", exc, page="开始生成", action="create_batch")
-            st.error(f"任务创建失败：{str(exc)[:200]}\n错误码：TASK-CREATE-001")
+            st.error("任务创建失败，请重试。\n错误编号：TASK-CREATE-001")
         finally:
             st.session_state[submitting_key] = False
 
