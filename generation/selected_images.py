@@ -12,7 +12,7 @@ from generation.inline_images import (
     run_inline_images,
     set_approved_image_budget,
 )
-from generation.workflow import begin_image_generation, finish_image_generation
+from generation.workflow import begin_image_generation, complete_image_delivery, finish_image_generation
 from modules.generation_store import generation_task_dir, load_generation_task, save_generation_task
 from modules.models import utc_now
 from modules.security import sanitize_json
@@ -69,6 +69,8 @@ def generate_selected_images(task_id: str, image_profile: dict[str, Any], settin
         state = load_generation_task(task_id)
         if not state or not state.get("article"):
             raise ProviderError("ARTICLE_NOT_AVAILABLE", "article result is missing")
+        if str(state.get("workflow_state") or "") in {"final_draft_confirmed", "export_ready", "exported"}:
+            return state
         if state.get("status") not in {"completed", "partial_success"}:
             raise ProviderError("TASK_NOT_READY", "article is not ready for image generation")
         options = dict(state.get("generation_options") or {})
@@ -94,6 +96,7 @@ def generate_selected_images(task_id: str, image_profile: dict[str, Any], settin
         if (not include_cover or _cover_ready(state, task_root)) and _inline_ready_count(state, task_root) >= inline_count:
             state.update({"status": "completed", "stage": "completed", "progress": 100, "failed_step": None, "error_code": "", "safe_error_message": "", "retryable": False, "inline_operation": False, "completed_at": state.get("completed_at") or utc_now()})
             finish_image_generation(state)
+            complete_image_delivery(state)
             return _persist(state, store)
     provider = OpenAIImageProvider(image_profile, network_settings=settings.get("network"))
     try:
@@ -117,7 +120,7 @@ def generate_selected_images(task_id: str, image_profile: dict[str, Any], settin
                 shutil.rmtree(work_root, ignore_errors=True)
                 with task_lock(task_id):
                     state = load_generation_task(task_id) or state
-                    cover = {"status": "completed", "path": "images/cover.png", "prompt": prompt, "metadata": metadata, "provider_response_type": provider.last_response_type}
+                    cover = {"role": "cover", "image_id": "cover", "status": "completed", "path": "images/cover.png", "prompt": prompt, "metadata": metadata, "provider_response_type": provider.last_response_type}
                     state["cover"] = cover
                     article = dict(state.get("article") or {})
                     article["cover"] = cover
@@ -142,8 +145,12 @@ def generate_selected_images(task_id: str, image_profile: dict[str, Any], settin
                 state = load_generation_task(task_id) or state
                 state.update({"status": "completed", "stage": "completed", "progress": 100, "completed_at": utc_now(), "inline_operation": False})
                 finish_image_generation(state)
-                _persist(state, store)
-        return state
+                complete_image_delivery(state)
+                return _persist(state, store)
+        with task_lock(task_id):
+            state = load_generation_task(task_id) or state
+            complete_image_delivery(state)
+            return _persist(state, store)
     except Exception as exc:
         with task_lock(task_id):
             state = load_generation_task(task_id) or state

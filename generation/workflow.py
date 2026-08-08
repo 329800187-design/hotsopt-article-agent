@@ -190,6 +190,18 @@ def confirm_final_draft(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def complete_image_delivery(state: dict[str, Any]) -> dict[str, Any]:
+    """Advance a completed single-article image run to an export-ready draft."""
+    initialize_workflow(state)
+    if str(state.get("workflow_state") or "") == "images_pending_confirmation":
+        confirm_images(state)
+    if str(state.get("workflow_state") or "") == "fusion_pending":
+        prepare_fusion(state)
+    if str(state.get("workflow_state") or "") == "final_draft_pending_preview":
+        confirm_final_draft(state)
+    return state
+
+
 def require_export_ready(state: dict[str, Any]) -> None:
     require_workflow(state, ("final_draft_confirmed", "export_ready", "exported"), "FINAL_DRAFT_NOT_READY")
     if (state.get("fusion_status") or {}).get("status") != "preview_ready":

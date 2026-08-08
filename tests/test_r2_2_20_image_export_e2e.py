@@ -12,6 +12,7 @@ from export.docx_exporter import export_article
 from export.zip_exporter import export_article_bundle
 from generation.workflow import (
     begin_image_generation,
+    complete_image_delivery,
     confirm_article,
     confirm_final_draft,
     confirm_images,
@@ -62,14 +63,15 @@ def _completed_state(tmp_path: Path, task_id: str = "r220-e2e") -> dict:
     return state
 
 
-def test_completed_article_has_prominent_image_entry_and_count_selector():
+def test_completed_article_has_single_article_image_entry_and_count_selector():
     source = Path("ui/rc1_app.py").read_text(encoding="utf-8")
     state = {"status": "completed", "quality_gate": {"status": "passed"}, "article": _article()}
     initialize_workflow(state)
     assert image_workflow_gate(state)["reasons"] == ["请先确认文章内容"]
-    assert "确认文章并进入配图" in source
-    assert 'options=[1, 2, 3, 4, 5]' in source
-    assert "继续完成图文" in source
+    assert "确认并生成图片" in source
+    assert 'st.selectbox("图片数量", [1, 2, 3]' in source
+    assert "快捷批量模式" not in source
+    assert "确认所选文章并生成图片" not in source
 
 
 def test_article_confirmation_enables_image_count_selection():
@@ -92,6 +94,30 @@ def test_two_local_images_create_and_persist_final_document(tmp_path):
     assert {item["path"] for item in state["final_document"]["images"]} == {"images/cover.png", "images/section-1.png"}
     confirm_final_draft(state)
     require_export_ready(state)
+
+
+def test_completed_images_auto_create_export_ready_document(tmp_path):
+    state = _completed_state(tmp_path, "r220-auto")
+    confirm_article(state)
+    begin_image_generation(state)
+    finish_image_generation(state)
+    complete_image_delivery(state)
+    assert state["workflow_state"] == "final_draft_confirmed"
+    assert state["final_document"]["document_kind"] == "final_document"
+    require_export_ready(state)
+
+
+def test_partial_image_success_auto_creates_document_from_available_images(tmp_path):
+    state = _completed_state(tmp_path, "r220-partial")
+    state["inline_images"].append({"role": "inline", "image_id": "section-2", "path": "images/section-2.png", "status": "failed"})
+    initialize_workflow(state)
+    confirm_article(state)
+    begin_image_generation(state)
+    finish_image_generation(state)
+    complete_image_delivery(state)
+    assert state["status"] == "completed"
+    assert state["workflow_state"] == "final_draft_confirmed"
+    assert {item["image_id"] for item in state["final_document"]["images"]} == {"cover", "section-1"}
 
 
 def test_word_contains_body_two_images_and_relationships(tmp_path):
@@ -123,10 +149,11 @@ def test_three_successful_images_are_all_persisted_and_embedded_when_sections_ar
         assert archive.read("word/_rels/document.xml.rels").decode("utf-8").count("relationships/image") == 3
 
 
-def test_fast_batch_controls_are_available_without_removing_single_article_mode():
+def test_batch_image_controls_are_hidden_from_customer_ui():
     source = Path("ui/rc1_app.py").read_text(encoding="utf-8")
-    for marker in ("快捷批量模式", "确认所选文章并生成图片", "统一图片数量", "生成图文稿并导出 Word", "查看详情"):
-        assert marker in source
+    for marker in ("快捷批量模式", "确认所选文章并生成图片", "统一图片数量", "生成图文稿并导出 Word", "导出本次创作 Word"):
+        assert marker not in source
+    assert '"image_plan_mode": "none"' in source
 
 
 def test_zip_contains_complete_word_and_images(tmp_path):
@@ -178,7 +205,7 @@ def test_installed_package_includes_latest_ui_workflow_component():
     source = Path("scripts/package_phase1.py").read_text(encoding="utf-8")
     ui = Path("ui/rc1_app.py").read_text(encoding="utf-8")
     assert '"ui"' in source
-    assert "确认文章并进入配图" in ui
+    assert "确认并生成图片" in ui
 
 
 def test_export_uses_final_document_instead_of_draft_article():
@@ -186,10 +213,10 @@ def test_export_uses_final_document_instead_of_draft_article():
     assert 'state.get("final_document") if state.get("workflow_state")' in source
 
 
-def test_batch_export_is_hidden_until_every_final_document_is_ready():
+def test_batch_export_is_hidden_from_customer_ui():
     source = Path("ui/rc1_app.py").read_text(encoding="utf-8")
-    assert "batch_export_ready" in source
-    assert "本次创作尚未完成图文交付流程" in source
+    assert "batch_export_ready" not in source
+    assert "导出本次创作 Word" not in source
 
 
 def test_export_ui_shows_stage_title_reason_retry_and_log_id():

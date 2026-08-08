@@ -25,7 +25,7 @@ from modules.app_paths import data_root, exports_root
 from modules.device_identity import device_status
 from modules.license_schema import LicenseValidationError
 from modules.license_service import check_license, check_system_time, clock_status, import_license, import_license_text, license_error_message, recover_clock_rollback
-from generation.image_budget import calculate_image_budget, image_cost_preview, normalize_image_plan, recommended_word_count
+from generation.image_budget import recommended_word_count
 from generation.workflow import WORKFLOW_STATES, image_workflow_gate
 from modules.app_version import APP_SHORT_NAME, APP_VERSION, BUILD_COMMIT, BUILD_TIME_UTC, PRODUCT_NAME, diagnostic_info
 from providers.errors import user_facing_error_message
@@ -101,6 +101,74 @@ INTERFACE_SOURCES = ["官方服务商", "API中转或自定义"]
 
 def _status(value: Any) -> str:
     return STATUS_LABELS.get(str(value or ""), "处理中")
+
+
+def _auto_complete_delivery_for_ui(task_id: str, state: dict[str, Any], restricted: bool) -> dict[str, Any]:
+    """Migrate older tasks past hidden delivery confirmations without model calls."""
+    if restricted:
+        return state
+    transitions = {
+        "images_pending_confirmation": "/images/confirm",
+        "fusion_pending": "/fusion/prepare",
+        "final_draft_pending_preview": "/fusion/confirm",
+    }
+    for _ in range(3):
+        workflow_state = str(state.get("workflow_state") or "")
+        suffix = transitions.get(workflow_state)
+        if not suffix:
+            break
+        try:
+            _api("POST", f"/tasks/{task_id}{suffix}", json={"image_ids": []} if suffix == "/images/confirm" else None)
+        except Exception:
+            break
+        state = load_generation_task(task_id) or state
+    return state
+
+
+def _article_body_preview(article: dict[str, Any], limit: int = 500) -> str:
+    body = str(article.get("body_markdown") or "").strip()
+    if not body and article.get("sections"):
+        body = "\n\n".join(str(section.get("body") or "").strip() for section in article.get("sections") or [] if isinstance(section, dict)).strip()
+    if len(body) > limit:
+        return body[:limit].rstrip() + "…"
+    return body
+
+
+def _image_status_label(state: dict[str, Any]) -> str:
+    images: list[dict[str, Any]] = []
+    cover = state.get("cover")
+    if isinstance(cover, dict) and cover.get("status"):
+        images.append(cover)
+    images.extend(item for item in state.get("inline_images") or [] if isinstance(item, dict))
+    completed = sum(item.get("status") == "completed" for item in images)
+    failed = sum(item.get("status") == "failed" for item in images)
+    active = any(item.get("status") in {"pending", "generating"} for item in images)
+    if failed and completed:
+        return f"部分完成 {completed}/{len(images)}"
+    if images and completed == len(images):
+        return f"已完成 {completed}/{len(images)}"
+    if active or str(state.get("workflow_state") or "") in {"images_generating", "images_pending_generation"}:
+        return "生成中"
+    return "未生成"
+
+
+def _export_status_label(state: dict[str, Any]) -> str:
+    if str((state.get("export_status") or {}).get("status") or "") == "exported":
+        return "已导出"
+    if isinstance(state.get("final_document"), dict) and str(state.get("workflow_state") or "") in {"final_draft_confirmed", "export_ready", "exported"}:
+        return "可导出"
+    return "未就绪"
+
+
+def _submit_single_article_images(task_id: str, state: dict[str, Any], image_count: int) -> None:
+    if str(state.get("workflow_state") or "") in {"article_pending_confirmation", "article_draft", ""}:
+        _api("POST", f"/tasks/{task_id}/article/confirm")
+    _api(
+        "POST",
+        f"/tasks/{task_id}/images/generate",
+        timeout=30,
+        json={"confirm_paid": True, "include_cover": True, "inline_count": int(image_count) - 1},
+    )
 
 
 def _safe_profile(value: Any) -> dict[str, Any]:
@@ -841,7 +909,7 @@ def render_topics(service: Any, categories: list[str]) -> None:
 
 
 def render_start(service: Any) -> None:
-    page_header("02 / 配置", "开始生成", "最多 5 篇文章，支持三种成本模式")
+    page_header("02 / 配置", "开始生成", "最多 5 篇文章，一次生成多篇文章，图片在任务列表中逐篇生成")
     basket = service.get_basket()
     if not basket:
         st.info("请先在「选择话题」中加入 1～5 个话题。")
@@ -850,24 +918,7 @@ def render_start(service: Any) -> None:
             st.rerun()
         return
 
-    # === Cost Mode Selection ===
-    cost_mode_label = st.radio(
-        "💰 成本模式",
-        ["🟢 低成本模式（纯文字，0张图片）", "🟡 3张图（1封面+2正文图）", "🔵 4张图（1封面+3正文图）", "🟣 5张图（1封面+4正文图）"],
-        horizontal=True,
-        key="rc1_cost_mode"
-    )
-    cost_mode_map = {
-        "🟢 低成本模式（纯文字，0张图片）": "none",
-        "🟡 3张图（1封面+2正文图）": "three",
-        "🔵 4张图（1封面+3正文图）": "four",
-        "🟣 5张图（1封面+4正文图）": "five",
-    }
-    image_mode = cost_mode_map[cost_mode_label]
-    # Preserve old widget state while changing the first option to the R2.2.18 low-cost plan.
-    if cost_mode_label == next(iter(cost_mode_map)):
-        image_mode = "low"
-    st.caption("低成本模式默认生成 2 张图（封面 + 1 张正文图），实际费用按模型设置中的单图估算价计算。")
+    image_mode = "none"
 
     # === Article Config ===
     mode_label = st.radio("创作模式", ["单热点生成多篇", "多热点各生成1篇"], horizontal=True)
@@ -907,20 +958,9 @@ def render_start(service: Any) -> None:
         style = st.selectbox("表达风格", ["客观通俗", "犀利评论", "专业分析"])
         image_style = st.selectbox("图片风格", ["动漫化新闻插画", "二维国漫新闻插画", "国风 3D 新闻插画"])
 
-    # === Budget Preview ===
+    # === Article budget preview ===
     with col3:
-        pricing_settings = load_settings()
-        configured_unit_price = pricing_settings.get("image_unit_price")
-        if configured_unit_price is None:
-            configured_unit_price = pricing_settings.get("image_estimated_cost_per_call")
-        unit_price = float(configured_unit_price) if configured_unit_price is not None else 0.10
-        preview = image_cost_preview(total_articles, word_count, image_mode, unit_price=unit_price)
         text_calls = total_articles
-        image_calls = calculate_image_budget(total_articles, image_mode)
-        st.caption(f"estimated image cost: {preview.get('estimated_cost', 0):.2f} yuan at {unit_price:.2f} yuan/image")
-        image_retry = 0
-        text_rewrite = 0
-        
         # ── R1.2.1 动态字数范围 ──
         _wc_map = {1200: "1200～1400", 1500: "1500～1700", 1600: "1600～1800"}
         _body_range = _wc_map.get(word_count, "1200～1400")
@@ -929,38 +969,13 @@ def render_start(service: Any) -> None:
         st.metric("预计文章数量", total_articles)
         st.metric("正文目标字数", f"{_body_range} 字")
         st.metric("基础文本调用", f"{text_calls} 次")
-        st.metric("预计图片调用", f"{image_calls} 次")
-        st.caption(f"自动图片重试：{image_retry} 次 · 自动文本重写：默认{text_rewrite} 次")
-        st.caption("实际费用由您的模型服务商收取。")
-
-    # Batch budget examples
-    with st.expander("💡 批量生成成本示例", expanded=False):
-        st.markdown("#### 生成 5 篇时各模式对比")
-        ex_cols = st.columns(3)
-        with ex_cols[0]:
-            st.markdown("**低成本模式**")
-            st.caption("文本调用约 5 次 · 图片调用 0 次")
-        with ex_cols[1]:
-            st.markdown("**经济配图模式**")
-            st.caption("文本调用约 5 次 · 图片调用 5 次")
-        with ex_cols[2]:
-            st.markdown("**标准配图模式**")
-            st.caption("文本调用约 5 次 · 图片调用 10 次")
-
-    # Paid confirmation for image modes
-    paid_batch_confirmed = True
-    if image_mode != "none":
-        st.warning(f"⚠️ 本次预计调用图片接口 {image_calls} 次，将产生实际费用。")
-        paid_batch_confirmed = st.checkbox("我确认本次图片模型调用可能产生费用（仅在文章完成后手动确认生成图片时才会实际调用）", key="rc133_paid_batch_image_confirm")
-        if not paid_batch_confirmed:
-            st.caption("未确认费用前，开始生成不可用。")
 
     # ── 提交锁：点击后立即disabled，防止重复提交 ──
     submitting_key = "rc1_generation_submitting"
     already_submitting = st.session_state.get(submitting_key)
     if st.button("🚀 开始生成" if not already_submitting else "⏳ 正在创建任务/正在进入队列…",
                  type="primary", use_container_width=True,
-                 disabled=already_submitting or (image_mode != "none" and not paid_batch_confirmed),
+                 disabled=already_submitting,
                  key="rc1_start_generate"):
         # The submit lock prevents duplicate clicks during this event.
         import hashlib as _hl
@@ -986,12 +1001,12 @@ def render_start(service: Any) -> None:
                     "style": style,
                     "image_style": image_style,
                     "word_count": recommended_word_count(word_count),
-                    "image_plan_mode": image_mode,
-                    "image_call_budget_per_article": calculate_image_budget(1, image_mode),
-                    "image_call_budget_per_batch": calculate_image_budget(total_articles, image_mode),
+                    "image_plan_mode": "none",
+                    "image_call_budget_per_article": 0,
+                    "image_call_budget_per_batch": 0,
                     "image_retry_limit": 0,
                     "image_unit_price": None,
-                    "confirm_paid": bool(paid_batch_confirmed)
+                    "confirm_paid": False
                 }
             })
             st.session_state["rc1_pending_created_batch"] = batch
@@ -1304,50 +1319,43 @@ def _content(restricted: bool = False) -> None:
                 st.subheader(str(batch.get("batch_name") or "未命名创作"))
                 st.caption(f"{_status(batch.get('status'))} · {completed}/{total} 篇完成 · 创建于 {batch.get('created_at', '')}")
                 st.progress(min(1.0, completed / total) if total else 0.0)
-                st.markdown("#### 快捷批量模式")
-                st.caption("默认每篇 2 张图片；单篇失败不会阻断其他文章。需要逐篇调整时再点击‘查看详情’。")
-                selected_ids: list[str] = []
-                for fast_item in (batch.get("items") or []):
-                    fast_task = fast_item.get("task") or {}
-                    fast_task_id = str(fast_task.get("task_id") or "")
-                    if not fast_task_id:
-                        continue
-                    fast_topic = (fast_item.get("topic_snapshot") or {}).get("title") or fast_task.get("task_name") or "未命名文章"
-                    if st.checkbox(str(fast_topic), value=True, key=f"rc1_fast_select_{batch.get('batch_id')}_{fast_task_id}"):
-                        selected_ids.append(fast_task_id)
-                fast_count = st.selectbox("统一图片数量", [1, 2, 3, 4, 5], index=1, key=f"rc1_fast_count_{batch.get('batch_id')}")
-                st.caption(f"已选 {len(selected_ids)} 篇 · 预计图片调用 {len(selected_ids) * int(fast_count)} 次")
-                if not restricted and selected_ids and st.button("确认所选文章并生成图片", type="primary", key=f"rc1_fast_generate_{batch.get('batch_id')}"):
-                    failures: list[str] = []
-                    for fast_task_id in selected_ids:
-                        try:
-                            _api("POST", f"/tasks/{fast_task_id}/article/confirm")
-                            _api("POST", f"/tasks/{fast_task_id}/images/generate", timeout=30, json={"confirm_paid": True, "include_cover": True, "inline_count": int(fast_count) - 1})
-                        except Exception as exc:
-                            failures.append(f"{fast_task_id}: {str(exc)[:120]}")
-                    if failures:
-                        st.warning("部分文章提交失败：" + "；".join(failures))
-                    else:
-                        st.success("已批量确认文章并提交图片生成。")
-                    st.rerun()
-                if not restricted:
-                    _download(f"/batches/{batch.get('batch_id')}/export/word", f"{batch.get('batch_name') or '本次创作'}.docx", "生成图文稿并导出 Word", f"rc1_fast_word_{batch.get('batch_id')}")
-                    _download(f"/batches/{batch.get('batch_id')}/export/zip", f"{batch.get('batch_name') or '本次创作'}.zip", "生成图文稿并导出 ZIP", f"rc1_fast_zip_{batch.get('batch_id')}")
+                # Legacy batch final_ready is backend-only; customer delivery is per article.
                 for item in (batch.get("items") or []):
                     task = item.get("task") or {}
                     task_id = str(task.get("task_id") or "")
                     if not task_id:
                         continue
+                    state = _auto_complete_delivery_for_ui(task_id, load_generation_task(task_id) or {}, restricted)
+                    article = customer_visible_article(state.get("article") or {}) if state.get("article") else {}
                     topics = task.get("selected_topics") if isinstance(task.get("selected_topics"), list) else []
                     topic = topics[0] if topics and isinstance(topics[0], dict) else {}
                     label = str(topic.get("title") or task.get("task_name") or "未命名任务")
-                    status = _status(task.get("status"))
-                    left, right = st.columns([4, 1])
-                    left.write(f"{label} · {status}")
-                    next_label = "继续完成图文" if str(task.get("status") or "") in {"completed", "partial_success", "review_required"} else "查看详情"
-                    if right.button(next_label, type="primary" if next_label == "继续完成图文" else "secondary", key=f"rc1_open_detail_{task_id}"):
-                        st.session_state["rc1_content_detail_task_id"] = task_id
-                        st.rerun()
+                    status = _status(state.get("status") or task.get("status"))
+                    with st.container(border=True):
+                        st.markdown(f"### {label}")
+                        if article.get("lead"):
+                            st.markdown(str(article.get("lead") or ""))
+                        preview = _article_body_preview(article)
+                        if preview:
+                            st.caption(preview)
+                        st.caption(f"文章状态：{status} · 图片状态：{_image_status_label(state)} · 导出状态：{_export_status_label(state)}")
+                        action_left, action_mid, action_right = st.columns([2, 2, 1])
+                        workflow_state = str(state.get("workflow_state") or "")
+                        if article and not restricted and workflow_state in {"article_pending_confirmation", "article_draft", "article_confirmed", ""}:
+                            image_count = action_left.selectbox("图片数量", [1, 2, 3], index=1, key=f"rc1_card_image_count_{task_id}")
+                            if action_mid.button("确认并生成图片", type="primary", key=f"rc1_card_generate_images_{task_id}"):
+                                try:
+                                    _submit_single_article_images(task_id, state, int(image_count))
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(_model_error_message(str(exc), image=True))
+                        elif workflow_state in {"images_generating", "images_pending_generation"}:
+                            action_left.info("图片生成中")
+                        elif isinstance(state.get("final_document"), dict) and not restricted:
+                            _download(f"/tasks/{task_id}/export/word", f"{article.get('title') or label}.docx", "一键导出 Word", f"rc1_card_word_{task_id}")
+                        if action_right.button("查看全文", key=f"rc1_open_detail_{task_id}"):
+                            st.session_state["rc1_content_detail_task_id"] = task_id
+                            st.rerun()
         return
 
     if st.button("返回任务列表", key="rc1_content_back_to_list"):
@@ -1410,7 +1418,7 @@ def _content(restricted: bool = False) -> None:
                 task_id = str(task.get("task_id") or "")
                 if task_id != selected_detail_task:
                     continue
-                state = load_generation_task(task_id) or {}
+                state = _auto_complete_delivery_for_ui(task_id, load_generation_task(task_id) or {}, restricted)
                 topic_title = (item.get("topic_snapshot") or {}).get("title") or "未命名话题"
                 with st.expander(f"{item.get('position', 1)}. {topic_title} · {_status(task.get('status'))}", expanded=True):
                     if not restricted:
@@ -1459,12 +1467,15 @@ def _content(restricted: bool = False) -> None:
                         with st.expander("查看全文"):
                             st.markdown(body_markdown or "")
                         workflow_state = str(state.get("workflow_state") or "article_pending_confirmation")
-                        st.caption(f"交付流程：{workflow_state}")
-                        if workflow_state == "article_pending_confirmation" and not restricted:
-                            st.info("下一步：确认文章内容，然后选择 1～5 张配图。")
-                            if st.button("确认文章并进入配图", type="primary", key=f"rc1_confirm_article_{task_id}"):
-                                _api("POST", f"/tasks/{task_id}/article/confirm")
-                                st.rerun()
+                        if workflow_state in {"article_pending_confirmation", "article_draft", "article_confirmed"} and not restricted:
+                            st.info("文章已生成，请选择 1～3 张图片。")
+                            image_count = st.selectbox("图片数量", [1, 2, 3], index=1, key=f"rc220_image_count_{task_id}")
+                            if st.button("确认并生成图片", type="primary", key=f"rc132_generate_selected_images_{task_id}"):
+                                try:
+                                    _submit_single_article_images(task_id, state, int(image_count))
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(_model_error_message(str(exc), image=True))
                         exportable_statuses = {"completed", "completed_with_warning", "warning", "partial_success", "review_required"}
                         layout_ok = (article.get("layout_check") or {}).get("passed", bool(body_markdown))
                         if workflow_state in {"final_draft_confirmed", "export_ready", "exported"} and state.get("status") in exportable_statuses and gate.get("status") != "failed" and layout_ok:
@@ -1473,27 +1484,9 @@ def _content(restricted: bool = False) -> None:
                             if st.button("打开保存位置", key=f"rc1_open_export_item_{task_id}"):
                                 _open_export_location()
                         else:
-                            st.info("导出门禁：请依次完成文章确认、图片确认、图文稿预览和最终确认。")
+                            st.info("图文稿准备完成后即可一键导出 Word。")
                         image_gate = image_workflow_gate(state)
-                        if workflow_state == "article_confirmed" and not restricted:
-                            st.markdown("#### 下一步：选择并生成配图")
-                            requested_mode = normalize_image_plan((state.get("generation_options") or {}).get("image_plan_mode"))
-                            default_count = {"economy": 1, "standard": 2, "three": 3, "four": 4, "five": 5}.get(requested_mode, 2)
-                            image_count = st.selectbox("图片数量", options=[1, 2, 3, 4, 5], index=default_count - 1, key=f"rc220_image_count_{task_id}")
-                            include_cover = True
-                            inline_count = int(image_count) - 1
-                            st.caption(f"将生成 {image_count} 张图片：1 张封面图和 {inline_count} 张正文图。")
-                            paid_images_confirmed = st.checkbox("我确认本次图片生成会真实调用模型并可能产生费用", key=f"rc132_paid_images_{task_id}")
-                            estimated_calls = (1 if include_cover else 0) + int(inline_count)
-                            st.caption(f"本次预计调用图片接口 {estimated_calls} 次；文章正文已先生成，未确认前不会调用图片接口。")
-                            if st.button("确认并生成所选图片", disabled=not paid_images_confirmed or estimated_calls == 0, key=f"rc132_generate_selected_images_{task_id}"):
-                                try:
-                                    _api("POST", f"/tasks/{task_id}/images/generate", timeout=30, json={"confirm_paid": True, "include_cover": include_cover, "inline_count": int(inline_count)})
-                                    st.success("图片生成已提交，费用确认已记录。")
-                                    st.rerun()
-                                except Exception as exc:
-                                    st.error(_model_error_message(str(exc), image=True))
-                        elif workflow_state in {"article_pending_confirmation", "article_draft"} and image_gate.get("reasons"):
+                        if workflow_state in {"article_pending_confirmation", "article_draft"} and image_gate.get("reasons"):
                             st.warning("暂不能生成图片：" + "；".join(str(item) for item in image_gate["reasons"]))
                         render_editor(task_id, state)
                     cover = generation_task_dir(task_id) / "images" / "cover.png"
@@ -1524,17 +1517,15 @@ def _content(restricted: bool = False) -> None:
                         inline_items = state.get("inline_images") or []
                     if inline_items:
                         st.markdown("#### 正文图片")
-                        inline_paid_confirmed = st.checkbox("我确认重试/重新生成正文图片可能产生费用", key=f"rc132_paid_inline_{task_id}")
+                        # Legacy per-image actions remain API-compatible but are intentionally hidden from the customer flow:
+                        # 重新生成全部正文图片 | 重新生成这张
                         completed_inline = sum(item.get("status") == "completed" for item in inline_items)
                         failed_inline = sum(item.get("status") == "failed" for item in inline_items)
                         st.caption(f"已完成 {completed_inline}/{len(inline_items)} 张 · 失败 {failed_inline} 张")
                         if any(item.get("status") == "generating" for item in inline_items):
                             st.info(f"正在生成图片 {min(completed_inline + 1, len(inline_items))}/{len(inline_items)}，同一图片渠道按顺序处理。")
-                        if failed_inline and not restricted and st.button("重试失败图片", disabled=not inline_paid_confirmed, key=f"rc1_inline_retry_failed_{task_id}"):
+                        if failed_inline and not restricted and st.button("重试失败图片", key=f"rc1_inline_retry_failed_{task_id}"):
                             _api("POST", f"/tasks/{task_id}/inline-images/retry-failed", json={"confirm_paid": True})
-                            st.rerun()
-                        if not restricted and st.button("重新生成全部正文图片", disabled=not inline_paid_confirmed, key=f"rc1_inline_regenerate_all_{task_id}"):
-                            _api("POST", f"/tasks/{task_id}/inline-images/regenerate", json={"confirm_paid": True})
                             st.rerun()
                         image_columns = st.columns(min(2, len(inline_items)))
                         for index, image in enumerate(inline_items):
@@ -1551,9 +1542,6 @@ def _content(restricted: bool = False) -> None:
                                         st.rerun()
                                 else:
                                     st.info(f"{image.get('section_title') or '正文图片'}：{_status(image.get('status'))}")
-                                if not restricted and st.button("重新生成这张" if image.get("status") == "completed" else "重试这张", disabled=not inline_paid_confirmed, key=f"rc1_inline_retry_{task_id}_{image.get('image_id')}"):
-                                    _api("POST", f"/tasks/{task_id}/inline-images/{image.get('image_id')}/retry", json={"confirm_paid": True})
-                                    st.rerun()
                     if state.get("similarity_status") == "review_required":
                         st.info("这篇内容与其他文章较接近，建议重新生成。")
                     left, right = st.columns(2)
@@ -1585,26 +1573,9 @@ def _content(restricted: bool = False) -> None:
                                     _api("POST", f"/batches/{batch['batch_id']}/items/{task_id}/research-regenerate", json={"reference_urls": [line.strip() for line in reference_urls.splitlines() if line.strip()], "supplemental_text": supplemental_text})
                                     st.rerun()
                     workflow_state = str(state.get("workflow_state") or "article_pending_confirmation")
-                    if article and workflow_state == "images_pending_confirmation" and not restricted:
-                        st.info("图片已生成。确认图片后即可生成完整图文稿。")
-                        if st.button("确认所选图片", type="primary", key=f"rc1_confirm_images_{task_id}"):
-                            _api("POST", f"/tasks/{task_id}/images/confirm", json={"image_ids": []})
-                            st.rerun()
-                    if article and workflow_state == "fusion_pending" and not restricted:
-                        st.info("图片已确认。下一步生成完整图文稿（此步骤不调用模型）。")
-                        if st.button("生成最终图文稿", type="primary", key=f"rc1_prepare_fusion_{task_id}"):
-                            _api("POST", f"/tasks/{task_id}/fusion/prepare")
-                            st.rerun()
-                    if article and workflow_state == "final_draft_pending_preview" and not restricted:
-                        st.info("最终图文稿预览已生成，请确认后导出")
-                        final_document = state.get("final_document") or {}
-                        with st.container(border=True):
-                            st.markdown(f"### {final_document.get('title') or article.get('title') or '最终图文稿'}")
-                            st.markdown(str(final_document.get("body_markdown") or body_markdown or ""))
-                            st.caption(f"已关联 {len(final_document.get('images') or [])} 张图片")
-                        if st.button("确认最终图文稿", type="primary", key=f"rc1_confirm_fusion_{task_id}"):
-                            _api("POST", f"/tasks/{task_id}/fusion/confirm")
-                            st.rerun()
+                    if article and workflow_state in {"images_pending_confirmation", "fusion_pending", "final_draft_pending_preview"}:
+                        st.info("图文稿正在自动整理，完成后即可一键导出 Word。")
+                    if article:
                         regen_col, rewrite_col, delete_col = st.columns(3)
                         if regen_col.button("重新搜索资料并生成", key=f"rc1_research_regen_item_{task_id}"):
                             _api("POST", f"/batches/{batch['batch_id']}/items/{task_id}/research-regenerate")
@@ -1618,15 +1589,6 @@ def _content(restricted: bool = False) -> None:
                             _api("DELETE", f"/tasks/{task_id}", json={"confirm": True, "delete_exports": False})
                             st.rerun()
 
-        delivery_states = [load_generation_task(str((item.get("task") or {}).get("task_id") or "")) or {} for item in (batch.get("items") or []) if str((item.get("task") or {}).get("status") or "") != "cancelled"]
-        batch_export_ready = bool(delivery_states) and all(str(item.get("workflow_state") or "") in {"final_draft_confirmed", "export_ready", "exported"} and isinstance(item.get("final_document"), dict) for item in delivery_states)
-        if batch.get("final_ready") and batch_export_ready:
-            _download(f"/batches/{batch['batch_id']}/export/word", f"{batch.get('batch_name') or '本次创作'}.docx", "导出本次创作 Word", f"rc1_batch_word_{batch['batch_id']}")
-            _download(f"/batches/{batch['batch_id']}/export/zip", f"{batch.get('batch_name') or '本次创作'}.zip", "导出本次创作 ZIP", f"rc1_batch_export_{batch['batch_id']}")
-            if st.button("打开保存位置", key=f"rc1_open_export_{batch['batch_id']}"):
-                _open_export_location()
-        elif batch.get("final_ready"):
-            st.info("本次创作尚未完成图文交付流程：请打开已完成文章，依次确认文章、生成并确认图片、预览并确认最终图文稿。")
     if not restricted and selected_delete_ids:
         selected_confirmed = st.checkbox("我确认删除选中的任务（不删除已导出的 Word/ZIP）", key="rc1_delete_selected_confirm")
         if st.button("删除选中", disabled=not selected_confirmed, key="rc1_delete_selected_tasks"):
