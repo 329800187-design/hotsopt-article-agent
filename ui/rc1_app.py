@@ -152,6 +152,25 @@ def _image_status_label(state: dict[str, Any]) -> str:
     return "未生成"
 
 
+def _completed_image_paths(task_id: str, state: dict[str, Any], limit: int = 3) -> list[str]:
+    root = generation_task_dir(task_id)
+    paths: list[str] = []
+    cover = state.get("cover")
+    if isinstance(cover, dict) and cover.get("status") == "completed":
+        cover_path = root / str(cover.get("path") or "images/cover.png")
+        if cover_path.is_file():
+            paths.append(str(cover_path))
+    for image in state.get("inline_images") or []:
+        if not isinstance(image, dict) or image.get("status") != "completed":
+            continue
+        image_path = root / str(image.get("path") or image.get("file_path") or "")
+        if image_path.is_file():
+            paths.append(str(image_path))
+        if len(paths) >= limit:
+            break
+    return paths[:limit]
+
+
 def _export_status_label(state: dict[str, Any]) -> str:
     if str((state.get("export_status") or {}).get("status") or "") == "exported":
         return "已导出"
@@ -1339,6 +1358,9 @@ def _content(restricted: bool = False) -> None:
                         if preview:
                             st.caption(preview)
                         st.caption(f"文章状态：{status} · 图片状态：{_image_status_label(state)} · 导出状态：{_export_status_label(state)}")
+                        completed_paths = _completed_image_paths(task_id, state)
+                        if completed_paths:
+                            st.image(completed_paths, width=220)
                         action_left, action_mid, action_right = st.columns([2, 2, 1])
                         workflow_state = str(state.get("workflow_state") or "")
                         if article and not restricted and workflow_state in {"article_pending_confirmation", "article_draft", "article_confirmed", ""}:

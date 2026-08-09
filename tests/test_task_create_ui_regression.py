@@ -98,3 +98,10 @@ def test_task_create_error_keeps_traceback_out_of_customer_message():
     source = (ROOT / "ui" / "rc1_app.py").read_text(encoding="utf-8")
     assert 'st.error("任务创建失败，请重试。\\n错误编号：TASK-CREATE-001")' in source
     assert "format_exc()" in source
+
+
+def test_content_cards_preview_completed_images_from_task_storage():
+    source = (ROOT / "ui" / "rc1_app.py").read_text(encoding="utf-8")
+    assert "def _completed_image_paths" in source
+    assert 'image.get("status") != "completed"' in source
+    assert "st.image(completed_paths, width=220)" in source
